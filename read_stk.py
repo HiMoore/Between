@@ -4,9 +4,11 @@ import numpy as np
 import pandas as pd
 from math import *
 from matplotlib import pyplot as plt
+import orbit
+from orbit import Orbit
+import time 
 plt.rcParams['font.sans-serif']=['SimHei'] #用来正常显示中文标签
 plt.rcParams['axes.unicode_minus']=False #用来正常显示负号
-
 
 
 
@@ -79,8 +81,8 @@ class STK_Simulation:
 		Time = self.number * self.step
 		plt.figure(1); 
 		plt.subplot(211); plt.xlabel("Time / s", fontsize=18); plt.ylabel("△ρ / m", fontsize=18)
-		plt.plot(range(0, Time, self.step), np.abs(delta_modr[0]), "g-", label=r"$△M_{0A} = △M_{0B} = +0.02°$")
-		plt.plot(range(0, Time, self.step), np.abs(delta_modr[1]), "r--", label=r"$△M_{0A} = -△M_{0B} = -0.004°$")
+		plt.plot(range(0, Time, self.step), np.abs(delta_modr[1]), "g-", label=r"$△M_{0A} = △M_{0B} = +0.02°$")
+		plt.plot(range(0, Time, self.step), np.abs(delta_modr[0]), "r--", label=r"$△M_{0A} = -△M_{0B} = -0.004°$")
 		plt.legend(fontsize=18)
 		
 		plt.subplot(212); plt.xlabel("Time / s", fontsize=18); plt.ylabel("△ψ / °", fontsize=18)
@@ -111,9 +113,48 @@ class STK_Simulation:
 		plt.legend(fontsize=18)
 		plt.show()
 		
-		
-		
 
+	def draw_accelerate(self, number=200, step=120):
+		data = pd.read_csv("STK/Moon.csv")[:number]
+		del data["Time (UTCG)"]
+		data *= 1000
+		data.columns = ['x (m)', 'y (m)', 'z (m)', 'vx (m/sec)', 'vy (m/sec)', 'vz (m/sec)']
+		r_array = data[['x (m)', 'y (m)', 'z (m)']].values
+		orb = Orbit()
+		a0 = np.array([ np.linalg.norm(orb.centreGravity(r_sat=r_sat, miu=orbit.MIU_M, Re=1.738e+06), 2) for r_sat in r_array ])
+		utc_list = orb.generate_time(start_t="20171231", end_t="20180101")
+		a1 = np.array([ np.linalg.norm(orb.nonspherGravity(r_sat, time_utc)) for (r_sat, time_utc) in zip(r_array, utc_list) ])
+		a_solar = np.array([ np.linalg.norm(orb.solarPress(beta_last=0.75, time_utc=time_utc, r_sat=r_sat)) \
+				for (r_sat, time_utc) in zip(r_array, utc_list) ])
+		a_sun = np.array([ np.linalg.norm(orb.thirdSun(time_utc=time_utc, r_sat=r_sat, miu=orbit.MIU_S)) \
+				for (r_sat, time_utc) in zip(r_array, utc_list) ])
+		a_earth = np.array([ np.linalg.norm(orb.thirdEarth(time_utc=time_utc, r_sat=r_sat, miu=orbit.MIU_E)) \
+				for (r_sat, time_utc) in zip(r_array, utc_list) ])
+		time_range = range(0, number*step, step)
+		plt.figure(1)
+		plt.xlabel("Time / s", fontsize=18); plt.ylabel(r"$a / (m/s^2)$", fontsize=18)
+		plt.plot(time_range, a0, "r-", label="centre gravity")
+		a = a0+a1+a_solar+a_sun+a_earth
+		plt.plot(time_range, a, "g-", label="Combined acceleration")
+		plt.legend(fontsize=18); 
+		
+		plt.figure(2)
+		plt.xlabel("Time / s", fontsize=18); plt.ylabel(r"$a / (m/s^2)$", fontsize=18)
+		plt.plot(time_range, a1, "g--", label="nonspher gravity")
+		plt.plot(time_range, a_sun, "r-", label="third-sun gravity")
+		plt.plot(time_range, a_earth, "y-", label="third-earth gravity")
+		plt.plot(time_range, a_solar, "b-", label="solar pressure gravity")
+		plt.legend(fontsize=18); plt.show()
+		
+		
+	def numberic(self, r1, r2):
+		miu = 3.986004415e+14
+		r1_norm = np.linalg.norm(r1, 2)
+		r2_norm = np.linalg.norm(r2, 2)
+		B1 = miu/r1_norm**5 * (3*np.outer(r1, r1) - np.dot(r1, r1)*np.identity(3))
+		B2 = miu/r2_norm**5 * (3*np.outer(r2, r2) - np.dot(r2, r2)*np.identity(3))
+		
+		
 
 
 
@@ -124,6 +165,9 @@ if __name__ == "__main__":
 	N_unit = stk.line_of_nodes(Sat_list[0])
 	[delta_modr, delta_angle] = stk.delta_modr_angle(minus_list, N_unit)
 	stk.draw_change(delta_modr, delta_angle)
-
+	#stk.draw_accelerate()
+	# cop_1, cop_2 = np.array([6832.842724, 801.612273, 435.239952]), np.array([6726.550816, 1327.179878, 720.599879])	#共面但不相碰
+	# cross_1, cross_2 = np.array([6832.842724, 801.612273, 435.239952]), np.array([6832.842724, 698.746779, 586.318165])		#不共面但同时经过交线
+	# non_1, non_2 = np.array([6832.842724, 801.612273, 435.239952]), np.array([6726.550816, 1156.871840, 970.730735])	#不共面也不同时经过交线
 	
 	
