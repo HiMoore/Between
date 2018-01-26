@@ -70,6 +70,7 @@ class Orbit:
 			P.append(np.array(p_ij))
 		return P
 		
+		
 	def legendre_cart_1(self, r_fixed, Re=RM, l=30, m=30):
 		'''计算缔合勒让德函数，直角坐标形式，王正涛-卫星跟踪卫星测量确定地球重力场(公式4-2-5)
 		输入：月固系下的卫星位置矢量, r_fixed, 		np.array
@@ -93,7 +94,7 @@ class Orbit:
 		
 		
 	def diff_legendre_row(self, phi, P, l=30, m=30):
-		'''计算完全规格化缔合勒让德函数的一阶导数，标准向前 行递推(雷伟伟_完全规格化_2016)
+		'''计算完全规格化缔合勒让德函数的一阶导数，标准向前 行递推(雷伟伟_完全规格化_2016), Plm'(cos(theta))
 		输入：地心纬度phi， 勒让德函数P
 		输出：一阶导数，包含dP_00项		list'''
 		dP, tan_phi = [], tan(phi)
@@ -105,7 +106,7 @@ class Orbit:
 		
 		
 	def diff_legendre_col(self, phi, P, l=30, m=30):
-		'''计算完全规格化缔合勒让德函数的一阶导数，标准向前 列递推(雷伟伟_完全规格化_2016)
+		'''计算完全规格化缔合勒让德函数的一阶导数，标准向前 列递推(雷伟伟_完全规格化_2016), Plm'(cos(theta))
 		输入：地心纬度phi， 勒让德函数P
 		输出：一阶导数，包含dP_00项		list'''
 		dP, tan_phi, cos_phi = [], tan(phi), cos(phi)
@@ -201,7 +202,7 @@ class Orbit:
 		'''计算中心天体的非球形引力加速度，使用直角坐标形式，single-time，王正涛(公式4.3.9)'''
 		HL = self.moon_Cbi(time_utc)	# 月惯系到月固系的方向余弦矩阵 3*3
 		r_fixed = np.dot(HL, r_sat)		# 转换为月固系下的位置矢量
-		E, F = self.legendre_cart_1(r_fixed, Re, l, m)	
+		E, F = self.legendre_cart(r_fixed, Re, l)	
 		C, S = self.readCoffients(number=495, n=l)
 		ax, ay, az = 0, 0, 0
 		const = miu/Re**2
