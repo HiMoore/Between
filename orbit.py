@@ -15,7 +15,8 @@ RE, RM, RS = 6378136.3, 1.738e+06, 695508000.0		#天体半径
 CSD_MAX, CSD_EPS, number = 1e+30, 1e-10, 495
 STEP = 600		#全局积分步长
 kernel = SPK.open(r"..\de421\de421.bsp")
-df = pd.read_csv("STK/LP165P.grv", sep="\t", header=None)
+C, S = np.load("Clm.npy"), np.load("Slm.npy")	# 序列化后代码速度提高4倍
+
 
 
 import time
@@ -313,84 +314,62 @@ class Orbit:
 		
 	def readCoffients(self, number=496, n=30):
 		'''获取中心天体球谐引力系数，默认前30阶，包括0阶项, np.array'''
-		global df
+		df = pd.read_csv("STK/LP165P.grv", sep="\t", header=None)
 		f = df[:number]
 		f.columns = ["l", "m", "Clm", "Slm"]
 		f = f.set_index([f["l"], f["m"]]); del f['l'], f['m']
 		Clm, Slm = f["Clm"], f["Slm"]
-		Clm = [list(Clm.loc[i]) for i in range(0, n+1)]
-		Slm = [list(Slm.loc[i]) for i in range(0, n+1)]
+		Clm = [ np.array(Clm.loc[i]) for i in range(0, n+1) ]
+		Slm = [ np.array(Slm.loc[i]) for i in range(0, n+1) ]
 		return [np.array(Clm), np.array(Slm)]	
 		
 		
-	def legendre_spher_col(self, phi, l=30, m=30):
+	def legendre_spher_col(self, phi, lm=30):
 		'''计算完全规格化缔合勒让德函数，球坐标形式，张飞-利用函数计算重力场元(公式2.14)，标准向前列递推算法
 		输入：地心纬度phi, rad;		阶次l和m
-		输出：可用于向量直接计算的勒让德函数，包含P_00项	list'''
+		输出：可用于向量直接计算的勒让德函数，包含P_00项	np.array'''
 		P = [ np.array([1, 0]), np.array([sqrt(3)*sin(phi), sqrt(3)*cos(phi), 0]) ]
-		for i in range(2, l+1):
+		for i in range(2, lm+1):
 			p_ij = [ sqrt( (4*i**2-1) / (i**2-j**2) ) * sin(phi) * P[i-1][j] - \
 					sqrt( (2*i+1)*(i+j-1)*(i-j-1) / ((i**2-j**2)*(2*i-3)) ) * P[i-2][j] for j in range(i) ]
 			p_ii = sqrt( (2*i+1)/(2*i) ) * cos(phi) * P[i-1][i-1]
 			p_ij.extend([p_ii, 0])
 			P.append(np.array(p_ij))
-		return P
+		return np.array(P)
 		
 		
-	def legendre_cart(self, r_fixed, Re=RM, l=30, m=30):
+	def legendre_cart(self, r_fixed, Re=RM, lm=30):
 		'''计算缔合勒让德函数，直角坐标形式，钟波-基于GOCE卫星(公式2.2.12)
 		输入：月固系下的卫星位置矢量, r_fixed, 		np.array
-		输出：直角坐标下的勒让德函数，包含0阶项, 	list'''
+		输出：直角坐标下的勒让德函数，包含0阶项, 	np.array'''
 		X, Y, Z = r_fixed[0], r_fixed[1], r_fixed[2]
 		r = np.linalg.norm(r_fixed, 2)
 		V = [ np.array([Re/r, 0]), np.array([ sqrt(3)*Z*Re**2/r**3, sqrt(3)*X*Re**2/r**3, 0]) ]
 		W = [ np.array([0, 0]), np.array([ 0, sqrt(3)*Y*Re**2/r**3, 0]) ]
-		const = Re/r**2
-		for i in range(2, l+2):
-			Vij = [ sqrt( (4*i**2-1) / (i**2-j**2) ) * Z*const * V[i-1][j] - \
-					sqrt( (2*i+1)*(i-j-1)*(i+j-1) / ((i**2-j**2)*(2*i-3)) ) * (Re/r)**2 * V[i-2][j] for j in range(i) ]
-			Vii = sqrt( (2*i+1) / (2*i) ) * const * ( X * V[i-1][i-1] - Y * W[i-1][i-1] )
+		cons_x, cons_y, cons_z, const = X*Re/r**2, Y*Re/r**2, Z*Re/r**2, (Re/r)**2
+		for i in range(2, lm+2):
+			Vij = [ sqrt( (4*i**2-1) / (i**2-j**2) ) * cons_z * V[i-1][j] - \
+					sqrt( (2*i+1)*(i-j-1)*(i+j-1) / ((i**2-j**2)*(2*i-3)) ) * const * V[i-2][j] for j in range(i) ]
+			Vii = sqrt( (2*i+1) / (2*i) ) * ( cons_x * V[i-1][i-1] - cons_y * W[i-1][i-1] )
 			Vij.extend([Vii, 0]); V.append(np.array(Vij))
 			
-			Wij = [ sqrt( (4*i**2-1) / (i**2-j**2) ) * Z*const * V[i-1][j] - \
-					sqrt( (2*i+1)*(i-j-1)*(i+j-1) / ((i**2-j**2)*(2*i-3)) ) * (Re/r)**2 * W[i-2][j] for j in range(i) ]
-			Wii = sqrt((2*i+1) / (2*i)) * const * ( X * W[i-1][i-1] + Y * V[i-1][i-1] )	#王正涛此处为减号
+			Wij = [ sqrt( (4*i**2-1) / (i**2-j**2) ) * cons_z * W[i-1][j] - \
+					sqrt( (2*i+1)*(i-j-1)*(i+j-1) / ((i**2-j**2)*(2*i-3)) ) * const * W[i-2][j] for j in range(i) ]
+			Wii = sqrt( (2*i+1) / (2*i) ) * ( cons_x * W[i-1][i-1] + cons_y * V[i-1][i-1] )	#钟波/王庆宾此处为加号，王正涛此处为减号
 			Wij.extend([Wii, 0]); W.append(np.array(Wij))
-		return (V, W)
+		return (np.array(V), np.array(W))
+	
 		
-		
-	def legendre_cart_1(self, r_fixed, Re=RM, l=30, m=30):
-		'''计算缔合勒让德函数，直角坐标形式，王正涛-卫星跟踪卫星测量确定地球重力场(公式4-2-5)
-		输入：月固系下的卫星位置矢量, r_fixed, 		np.array
-		输出：直角坐标下的勒让德函数，包含0阶项, 	list'''
-		X, Y, Z = r_fixed[0], r_fixed[1], r_fixed[2]
-		r = np.linalg.norm(r_fixed, 2)
-		E = [ np.array([Re/r, 0]), np.array([ sqrt(3)*Z*Re**2/r**3, sqrt(3)*X*Re**2/r**3, 0]) ]
-		F = [ np.array([0, 0]), np.array([ 0, sqrt(3)*Y*Re**2/r**3, 0]) ]
-		const = Re/r**2
-		for i in range(2, l+2):
-			Eij = [ sqrt( (4*i**2-1) / (i**2-j**2) ) * Z*const * E[i-1][j] - \
-					sqrt( (2*i+1)*(i-j-1)*(i+j-1) / ((i**2-j**2)*(2*i-3)) ) * (Re/r)**2 * E[i-2][j] for j in range(i) ]
-			Eii = sqrt((2*i+1) / (2*i)) * const * ( X* E[i-1][i-1] - Y * F[i-1][i-1] )
-			Eij.extend([Eii, 0]); E.append(np.array(Eij))
-			
-			Fij = [ sqrt( (4*i**2-1) / (i**2-j**2) ) * Z*const * F[i-1][j] - \
-					sqrt( (2*i+1)*(i-j-1)*(i+j-1) / ((i**2-j**2)*(2*i-3)) ) * (Re/r)**2 * F[i-2][j] for j in range(i) ]
-			Fii = sqrt((2*i+1) / (2*i)) * const * ( X * F[i-1][i-1] + Y * E[i-1][i-1] )	# 钟波此处为加号
-			Fij.extend([Fii, 0]); F.append(np.array(Fij))
-		return ( E, F )
-		
-		
-	def diff_legendre_spher(self, phi, P, l=30, m=30):
+	def diff_legendre_spher(self, phi, P, lm=30):
 		'''计算完全规格化缔合勒让德函数的一阶导数，球坐标形式，王正涛-卫星跟踪卫星测量(公式2-4-6)
 		输入：地心纬度phi， 勒让德函数P
-		输出：一阶导数，包含dP_00项		list'''
+		输出：一阶导数，包含dP_00项		np.array'''
 		deri_P, tan_phi = [], tan(phi)
-		for i in range(0, l+1):
+		for i in range(0, lm+1):
 			dp_i0 = [ sqrt(i*(i+1) / 2) * P[i][1] ]  # j=0
 			dp_ij = [ sqrt((i-j)*(i+j+1)) * P[i][j+1] - j*tan_phi * P[i][j] for j in range(1, i+1) ]
 			dp_i0.extend(dp_ij); deri_P.append(np.array(dp_i0))
-		return deri_P
+		return np.array(deri_P)
 		
 		
 	def centreGravity(self, r_sat, miu=MIU_M):
@@ -400,7 +379,7 @@ class Orbit:
 		return g0
 
 		
-	def nonspherGravity(self, r_sat, time_utc, miu=MIU_M, Re=RM, l=30, m=30):
+	def nonspherGravity(self, r_sat, time_utc, miu=MIU_M, Re=RM, lm=30):
 		'''计算中心天体的非球形引力加速度，single-time, 王正涛-卫星跟踪卫星测量(公式2-4-7)
 		输入：惯性系下卫星位置矢量r_sat，均为np.array;	utc时间(datetime);	miu默认为月球;
 		输出：返回中心天体的引力加速度, np.array'''
@@ -409,36 +388,37 @@ class Orbit:
 		r_norm = np.linalg.norm(r_fixed, 2)
 		phi, lamda = atan(r_fixed[2] / sqrt(r_fixed[0]**2+r_fixed[1]**2)), atan(r_fixed[1]/r_fixed[0])
 		spher2rect = np.array([ [cos(phi)*cos(lamda), cos(phi)*sin(lamda), sin(phi)], \
-					[(-1/r_norm)*sin(phi)*cos(lamda), (-1/r_norm)*sin(phi)*sin(lamda),  (-1/r_norm)*cos(phi)], \
+					[(-1/r_norm)*sin(phi)*cos(lamda), (-1/r_norm)*sin(phi)*sin(lamda),  (1/r_norm)*cos(phi)], \
 					[(-1/r_norm)*sin(lamda)/cos(phi), (1/r_norm)*cos(lamda)/cos(phi), 0] ])	#球坐标到直角坐标 3*3
-		P = self.legendre_spher_col(phi, l, m)	# 勒让德函数
+		P = self.legendre_spher_col(phi, lm)	# 勒让德函数
 		tan_phi = tan(phi)
-		Clm, Slm = self.readCoffients(number=495, n=l)	# 包括0阶项
+		global C, S
 		Vr, Vphi, Vlamda, const = 0, 0, 0, Re/r_norm
-		for i in range(2, l):	# 王正涛i从2开始
+		for i in range(2, lm):	# 王正涛i从2开始
 			temp_r, temp = (i+1)*const**i, const**i
-			Vr +=  Clm[i][0] * P[i][0] * temp_r		# j=0时dP不同，需要单独计算
-			Vphi += Clm[i][0] * ( sqrt(i*(i+1)/2) * P[i][1] ) * temp
+			Vr +=  C[i][0] * P[i][0] * temp_r		# j=0时dP不同，需要单独计算
+			Vphi += C[i][0] * ( sqrt(i*(i+1)/2) * P[i][1] ) * temp
 			for j in range(1, i+1):
-				Vr += ( Clm[i][j]*cos(j*lamda) + Slm[i][j]*sin(j*lamda) ) * P[i][j] * temp_r
-				Vphi += ( Clm[i][j]*cos(j*lamda) + Slm[i][j]*sin(j*lamda) ) * \
+				Vr += ( C[i][j]*cos(j*lamda) + S[i][j]*sin(j*lamda) ) * P[i][j] * temp_r
+				Vphi += ( C[i][j]*cos(j*lamda) + S[i][j]*sin(j*lamda) ) * \
 						( sqrt((i-j)*(i+j+1)) * P[i][j+1] - j * tan_phi * P[i][j] ) * temp 	# check dP_lm!
-				Vlamda += ( -Clm[i][j]*sin(j*lamda) + Slm[i][j]*cos(j*lamda) ) * P[i][j] * temp * j
+				Vlamda += ( -C[i][j]*sin(j*lamda) + S[i][j]*cos(j*lamda) ) * P[i][j] * temp * j
 		g1 = np.array([-miu/r_norm**2*Vr, miu/r_norm*Vphi, miu/r_norm*Vlamda])	# 非球形引力 3*1
 		g1 = np.dot(g1, spher2rect)	 # 球坐标到直角坐标，乘积顺序不要反了
 		g1 = np.dot(HL.T, g1)	# 将月固系下加速度转换到月惯系下
 		return g1
+
 		
-		
-	def nonspherG_cart(self, r_sat, time_utc, miu=MIU_M, Re=RM, l=30, m=30):
+	def nonspherG_cart(self, r_sat, time_utc, miu=MIU_M, Re=RM, lm=30):
 		'''计算中心天体的非球形引力加速度，使用直角坐标形式，single-time，钟波-基于GOCE卫星(公式2.2.14)'''
 		HL = self.moon_Cbi(time_utc)	# 月惯系到月固系的方向余弦矩阵 3*3
 		r_fixed = np.dot(HL, r_sat)		# 转换为月固系下的位置矢量
-		V, W = self.legendre_cart(r_fixed, Re, l, m)	
-		C, S = self.readCoffients(number=495, n=l)
+		V, W = self.legendre_cart(r_fixed, Re, lm)
+		global C, S
 		ax, ay, az = 0, 0, 0
 		const = miu/Re**2
-		for i in range(0, l):	# V,W均存在0阶项，直接从1阶项开始
+		td = { 1: 2}
+		for i in range(0, lm):	# V, W, C, S均存在0阶项
 			temp = (2*i+1) / (2*i+3)
 			a1 = sqrt((i+1)*(i+2) * temp/2)
 			ax += const * (-a1*V[i+1][1] * C[i][0])		# j=0时公式不同，单独计算
@@ -447,7 +427,7 @@ class Orbit:
 			for j in range(1, i):
 				a2 = sqrt( (i+j+1)*(i+j+2) * temp )
 				b1_b2 = (i-j+1) * (i-j+2)
-				a3 = sqrt( temp/b1_b2 ) if j != 1 else sqrt( 2*temp / b1_b2)
+				a3 = sqrt( td.get(j, 1) * temp/b1_b2 )
 				b1_b2_a3 = (i-j+1)*(i-j+2) * a3 
 				a4 = sqrt( (i+j+1)/(i-j+1) * temp )
 				ax += const/2 * ( -a2 * (V[i+1][j+1]*C[i][j] + W[i+1][j+1]*S[i][j]) + \
@@ -455,34 +435,6 @@ class Orbit:
 				ay += const/2 * ( -a2 * (W[i+1][j+1]*C[i][j] - V[i+1][j+1]*S[i][j] ) - \
 								  b1_b2_a3 * (W[i+1][j-1]*C[i][j] - V[i+1][j-1]*S[i][j] ) )
 				az += const * ( -(i-j+1)*a4 * (V[i+1][j]*C[i][j] + W[i+1][j]*S[i][j]) )
-		g1 = np.array([ax, ay, az])
-		g1 = np.dot(HL.T, g1)	# 将月固系下加速度转换到月惯系下
-		return g1
-		
-		
-	def nonspherG_cart_1(self, r_sat, time_utc, miu=MIU_M, Re=RM, l=30, m=30):
-		'''计算中心天体的非球形引力加速度，使用直角坐标形式，single-time，王正涛(公式4.3.9)'''
-		HL = self.moon_Cbi(time_utc)	# 月惯系到月固系的方向余弦矩阵 3*3
-		r_fixed = np.dot(HL, r_sat)		# 转换为月固系下的位置矢量
-		E, F = self.legendre_cart_1(r_fixed, Re, l, m)	
-		C, S = self.readCoffients(number=495, n=l)
-		ax, ay, az = 0, 0, 0
-		const = miu/Re**2
-		for i in range(2, l):	# E,F均存在0阶项，直接从2阶项开始
-			temp = (2*i+1) / (2*i+3)
-			b1 = sqrt( (i+1)*(i+2)*temp/2 )
-			ax += const * (-b1*E[i+1][1] * C[i][0])		# j=0时公式不同，单独计算
-			ay += const * (-b1*F[i+1][1] * C[i][0])
-			az += const * ( sqrt( (i+1)**2 * temp) * (-E[i+1][0]*C[i][0] - F[i+1][0]*S[i][0]) )	 # az需要j从0开始
-			for j in range(1, i):
-				b2 = sqrt( (i+j+1)*(i+j+2) * temp )
-				b3 = sqrt( (i-j+1)*(i-j+2) * temp )
-				b4 = sqrt( (i-j+1)*(i+j+1) * temp )
-				ax += const/2 * ( b2 * (-E[i+1][j+1]*C[i][j] - F[i+1][j+1]*S[i][j]) + \
-								  b3 * ( E[i+1][j-1]*C[i][j] + F[i+1][j-1]*S[i][j]) )
-				ay += const/2 * ( b2 * (-F[i+1][j+1]*C[i][j] + E[i+1][j+1]*S[i][j] ) + \
-								  b3 * (-F[i+1][j-1]*C[i][j] + E[i+1][j-1]*S[i][j] ) )
-				az += const * ( b4 * (-E[i+1][j]*C[i][j] - F[i+1][j]*S[i][j]) )
 		g1 = np.array([ax, ay, az])
 		g1 = np.dot(HL.T, g1)	# 将月固系下加速度转换到月惯系下
 		return g1
@@ -505,10 +457,40 @@ class Orbit:
 		return F
 		
 		
-	def jacobian(self, r_sat, time_utc, miu=MIU_M, Re=RM, l=30, m=30):
-		'''计算系统动力学的Jacobian矩阵'''
-		
-		
+	def jacobian_1(self, r_sat, time_utc, miu=MIU_M, Re=RM, lm=30):
+		'''计算系统动力学的Jacobian矩阵，王正涛-卫星跟踪卫星(4-3-12)'''
+		HL = self.moon_Cbi(time_utc)	# 月惯系到月固系的方向余弦矩阵 3*3
+		r_fixed = np.dot(HL, r_sat)		# 转换为月固系下的位置矢量
+		E, F = self.legendre_cart(r_fixed, Re, lm)
+		C, S = self.readCoffients(number=495, n=lm)
+		const = miu / Re**3
+		da_x, da_y, da_z = 0, 0, 0
+		for i in range(0, lm+1):
+			temp = (2*i+1) / (2*i+5)
+			d1 = sqrt( (i+1)*(i+2)*(i+3)*(i+4) * temp/2 )
+			d2 = sqrt( (i+1)**2 * (i+2)**2 * temp )
+			d3 = sqrt( (i+2)*(i+3)*(i+4)*(i+5) * temp/2 )
+			d4 = sqrt( i*(i+1)*(i+2)*(i+3) * temp )
+			d8 = sqrt( (i+1)**2 * (i+2)*(i+3) * temp/2 )
+			# j=0和j=1时, ax对X的偏导
+			da_xx += const/2 * ( d1 * (E[i+2][2] * C[i][0]) - d2 * (E[i+2][0] * C[i][0]) ) 
+			da_xx += const/4 * ( d3 * (E[i+2][3] * C[i][1] + F[i+2][3] * S[i][1]) + \
+								d4 * (-3*E[i+2][1] * C[i][1] - F[i+2][1] * S[i][1]) )
+			# j=0和j=1时, ax对Y的偏导, 也是ay对X的偏导		
+			da_xy += const/2 * ( d1 * (F[i+2][2] * C[i][0]) )
+			da_xy += const/4 * ( d3 * (F[i+2][3] * C[i][1] - E[i+2][3] * S[i][1]) + \
+								d4 * (-F[i+2][3] * C[i][1] - E[i+2][1] * S[i][1]) )
+			# j=0和j=1时, ax对Z的偏导, 也是az对X的偏导	
+			da_xz += const * ( d8 * (E[i+2][1] * C[i][0]) )
+			d9_1 = sqrt( (i+1)**2 * (i+2)*(i+3) * temp/4 )
+			d10_1 = sqrt( i**2 * (i+1)**2 * (i+2)**2 / (2*i*(i+1)) * temp )
+			da_xz += const * ( d9_1 * (E[i+2][2] * C[i][1] + F[i+2][2] * S[i][1]) + \
+							d10_1 * (-E[i+2][0] * C[i][1] - F[i+2][0] * S[i][1]) )
+			# j=0和j=1时, ay对Z的偏导, 也是az对Y的偏导	
+			da_yz += const * ( d8 * (F[i+2][1] * C[i][0]) )
+			da_yz += const * ( d9_1 * (F[i+2][1] * C[i][1] - E[i+2][2] * S[i][1]) + 
+							d10_1 * (F[i+2][0] * C[i][0] - E[i+2][0] * S[i][1]) )
+			# j=0和j=1时, az对Z的偏导单独计算
 		
 
 		
@@ -523,28 +505,27 @@ if __name__ == "__main__":
 	sixGeng = ob.rv2sixEle_Geng(initial_rv)
 	sixZhang = ob.rv2sixEle_Zhang(initial_rv)
 	time_list = ob.generate_time(start_t="20171231", end_t="20180131")
-	C, S = ob.readCoffients()
-	data = pd.read_csv("STK/Moon.csv")[:10]
+
+	number = 35
+	data = pd.read_csv("STK/Moon.csv")[:number]	# 取前number个点进行试算
 	del data["Time (UTCG)"]
 	data *= 1000
 	data.columns = ['x (m)', 'y (m)', 'z (m)', 'vx (m/sec)', 'vy (m/sec)', 'vz (m/sec)']
 	r_array = data[['x (m)', 'y (m)', 'z (m)']].values
-	utc_list = ob.generate_time(start_t="20171231", end_t="20180101")
-	r_sat, time_utc = r_array[1], utc_list[1]
-	HL = ob.moon_Cbi(time_utc)
-	r_fixed = np.dot(HL, r_sat)
-	r = np.linalg.norm(r_fixed, 2)
+	utc_list = (ob.generate_time(start_t="20171231", end_t="20180101"))[:number]
+	HL = ob.moon_Cbi(utc_list[1])	# 月惯系到月固系的方向余弦矩阵 3*3
+	r_fixed = np.dot(HL, r_array[1])		# 应该在固连系下建立，王正涛
+	r_norm = np.linalg.norm(r_fixed, 2)
 	phi, lamda = atan(r_fixed[2] / sqrt(r_fixed[0]**2+r_fixed[1]**2)), atan(r_fixed[1]/r_fixed[0])
-	P = ob.legendre_spher_col(phi, l=30, m=30)
-	(V, W) = ob.legendre_cart(r_fixed, Re=RM, l=30, m=30)
-	(E, F) = ob.legendre_cart_1(r_fixed, Re=RM, l=30, m=30)
-	print((np.array(V) - np.array(E))[:10])
-	print((np.array(W) - np.array(F))[:10])
-	a1 = [ np.linalg.norm(ob.nonspherGravity(r_sat, time_utc), 2) for (r_sat, time_utc) in zip(r_array, utc_list) ]
+	
+	start = time.clock()
+	a1 = np.array([ np.linalg.norm(ob.nonspherGravity(r_sat, time_utc), 2) for (r_sat, time_utc) in zip(r_array, utc_list) ])
+	print("a1 cost: %f" % (time.clock() - start))
 	plt.plot(a1, label="a1 spher")
-	a3 = [ np.linalg.norm(ob.nonspherG_cart(r_sat, time_utc)) for (r_sat, time_utc) in zip(r_array, utc_list) ]
+	start = time.clock()
+	a3 = np.array([ np.linalg.norm(ob.nonspherG_cart(r_sat, time_utc), 2) for (r_sat, time_utc) in zip(r_array, utc_list) ])
+	print("a3 cost: %f" % (time.clock() - start))
 	plt.plot(a3, "--", label="a3 cart")
-	a4 = [ np.linalg.norm(ob.nonspherG_cart_1(r_sat, time_utc)) for (r_sat, time_utc) in zip(r_array, utc_list) ]
-	plt.plot(a4, "--", label="a4 cart")
+	plt.plot(a3-a1, "--", label="delta")
 	plt.legend(); plt.show()
 	
