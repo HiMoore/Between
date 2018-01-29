@@ -98,28 +98,15 @@ class Orbit:
 		'''按定义计算E, F, 测试球坐标Plm和直角坐标E, F是否等价'''
 		r = np.linalg.norm(r_fixed, 2)
 		phi, lamda = atan(r_fixed[2] / sqrt(r_fixed[0]**2+r_fixed[1]**2)), atan(r_fixed[1]/r_fixed[0])
-		E, F = self.legendre_cart(r_fixed)
-		P = self.legendre_spher_col(phi)
+		P = self.legendre_spher_col(phi, lm=31)
 		V, W = [], []
-		for i in range(0, lm+1):
+		for i in range(0, lm+2):
 			const = (Re/r)**(i+1)
 			Vij = np.array([ P[i][j] * cos(j*lamda) for j in range(i+1) ] + [0]) * const
 			Wij = np.array([ P[i][j] * sin(j*lamda) for j in range(i+1) ] + [0]) * const
 			V.append(Vij); W.append(Wij)
 		V, W = np.array(V), np.array(W)
-		# pprint(E[:4])
-		# print("\n")
-		# pprint(V[:4])
-		# print("\n\n")
-		# pprint(F[:4])
-		# print("\n")
-		# pprint(W[:4])
-		# print((V-E[:31]), "\n\n", (W-F[:31]))
-		
-		V_11 = (Re/r)**2 * P[1][1] * cos(lamda)
-		W_11 = (Re/r)**2 * P[1][1] * sin(lamda)
-		# print(V_11, W_11)
-		return V, W
+		return V, W	
 	# test
 		
 		

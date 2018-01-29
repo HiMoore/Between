@@ -421,22 +421,6 @@ class Orbit:
 		g1 = np.dot(g1, spher2rect)	 # 球坐标到直角坐标，乘积顺序不要反了
 		g1 = np.dot(HL.T, g1)	# 将月固系下加速度转换到月惯系下
 		return g1
-
-	def cart_define(self, r_fixed, Re=RM, lm=30):
-		'''按定义计算E, F, 测试球坐标Plm和直角坐标E, F是否等价'''
-		r = np.linalg.norm(r_fixed, 2)
-		phi, lamda = atan(r_fixed[2] / sqrt(r_fixed[0]**2+r_fixed[1]**2)), atan(r_fixed[1]/r_fixed[0])
-		P = self.legendre_spher_col(phi)
-		V, W = [], []
-		for i in range(0, lm+1):
-			const = (Re/r)**(i+1)
-			Vij = np.array([ P[i][j] * cos(j*lamda) for j in range(i+1) ] + [0]) * const
-			Wij = np.array([ P[i][j] * sin(j*lamda) for j in range(i+1) ] + [0]) * const
-			V.append(Vij); W.append(Wij)
-		V, W = np.array(V), np.array(W)
-		# print(E[:5], "\n\n", V[:5])
-		# print((V-E[:31]), "\n\n", (W-F[:31]))
-		return V, W	
 		
 	
 	def nonspherG_cart(self, r_sat, time_utc, miu=MIU_M, Re=RM, lm=30):
@@ -444,36 +428,6 @@ class Orbit:
 		HL = self.moon_Cbi(time_utc)	# 月惯系到月固系的方向余弦矩阵 3*3
 		r_fixed = np.dot(HL, r_sat)		# 转换为月固系下的位置矢量
 		V, W = self.legendre_cart(r_fixed, Re, lm)
-		global C, S
-		ax, ay, az = 0, 0, 0
-		const = miu/Re**2
-		td = { 1: 2}
-		for i in range(0, lm):	# V, W, C, S均存在0阶项
-			temp = (2*i+1) / (2*i+3)
-			a1 = sqrt((i+1)*(i+2) * temp/2)
-			ax += const * (-a1*V[i+1][1] * C[i][0])		# j=0时公式不同，单独计算
-			ay += const * (-a1*W[i+1][1] * C[i][0])
-			az += const * ( -(i+1)*sqrt(temp) * (V[i+1][0]*C[i][0] + W[i+1][0]*S[i][0]) )	 # az需要j从0开始
-			for j in range(1, i):
-				a2 = sqrt( (i+j+1)*(i+j+2) * temp )
-				b1_b2 = (i-j+1) * (i-j+2)
-				a3 = sqrt( td.get(j, 1) * temp/b1_b2 )
-				b1_b2_a3 = (i-j+1)*(i-j+2) * a3 
-				a4 = sqrt( (i+j+1)/(i-j+1) * temp )
-				ax += const/2 * ( -a2 * (V[i+1][j+1]*C[i][j] + W[i+1][j+1]*S[i][j]) + \
-								  b1_b2_a3 * ( V[i+1][j-1]*C[i][j] + W[i+1][j-1]*S[i][j]) )
-				ay += const/2 * ( -a2 * (W[i+1][j+1]*C[i][j] - V[i+1][j+1]*S[i][j] ) - \
-								  b1_b2_a3 * (W[i+1][j-1]*C[i][j] - V[i+1][j-1]*S[i][j] ) )
-				az += const * ( -(i-j+1)*a4 * (V[i+1][j]*C[i][j] + W[i+1][j]*S[i][j]) )
-		g1 = np.array([ax, ay, az])
-		g1 = np.dot(HL.T, g1)	# 将月固系下加速度转换到月惯系下
-		return g1
-		
-	def nonspherG_cart_1(self, r_sat, time_utc, miu=MIU_M, Re=RM, lm=30):
-		'''计算中心天体的非球形引力加速度，使用直角坐标形式，single-time，钟波-基于GOCE卫星(公式2.2.14)'''
-		HL = self.moon_Cbi(time_utc)	# 月惯系到月固系的方向余弦矩阵 3*3
-		r_fixed = np.dot(HL, r_sat)		# 转换为月固系下的位置矢量
-		V, W = self.cart_define(r_fixed, Re, lm)
 		global C, S
 		ax, ay, az = 0, 0, 0
 		const = miu/Re**2
@@ -517,8 +471,8 @@ class Orbit:
 		return F
 		
 		
-	def jacobian_1(self, r_sat, time_utc, miu=MIU_M, Re=RM, lm=30):
-		'''计算系统动力学的Jacobian矩阵，王正涛-卫星跟踪卫星(4-3-12)'''
+	def jacobian_A(self, r_sat, time_utc, miu=MIU_M, Re=RM, lm=30):
+		'''计算系统动力学的Jacobian--A矩阵，加速度相对位置的偏导数矩阵，王正涛-卫星跟踪卫星(4-3-12)'''
 		HL = self.moon_Cbi(time_utc)	# 月惯系到月固系的方向余弦矩阵 3*3
 		r_fixed = np.dot(HL, r_sat)		# 转换为月固系下的位置矢量
 		E, F = self.legendre_cart(r_fixed, Re, lm)
@@ -550,10 +504,22 @@ class Orbit:
 			da_yz += const * ( d8 * (F[i+2][1] * C[i][0]) )
 			da_yz += const * ( d9_1 * (F[i+2][1] * C[i][1] - E[i+2][2] * S[i][1]) + 
 							d10_1 * (F[i+2][0] * C[i][0] - E[i+2][0] * S[i][1]) )
-			# j=0和j=1时, az对Z的偏导单独计算
-		
-	
-		
+			for j in range(2, i):
+				d6 = sqrt( (i-j+1)*(i-j+2)*(i+j+1)*(i+j+2) * temp )
+				d7 = sqrt( (i-j+1)*(i-j+2)*(i-j+3)*(i-j+4)*(i+j+1)*(i+j+2) * temp ) if j != 2 \
+						else sqrt( (i-1)*i*(i+3)*(i+4) / (i*(i-1)*(i+1)*(i+2)) * temp )
+				d9 = sqrt( (i-j+1)*(i-j+2)*(i-j+3)*(i-j+4)*(i+j+1) * temp / 4 )
+				d10 = sqrt( (i-j+1)*(i-j+2)*(i-j+3)*(i-j+4)*(i+j+1) * temp / 4 )
+				da_xx += const/4 * ( d5 * (E[i+2][j+2] * C[i][j] + F[i+2][j+2] * S[i][j]) + \
+								   2*d6 * (-E[i+2][j] * C[i][j] - F[i+2][j] * S[i][j]) + \
+								   2*d7 * (E[i+2][j-2] * C[i][j] - F[i+2][j-2] * S[i][j]) )
+				da_xy += const/4 * ( d5 * (F[i+2][j+2] * C[i][j] - E[i+2][j+2] * S[i][j]) + \
+								   2*d7 * (-F[i+2][j-2] * C[i][j] + F[i+2][j-2] * S[i][j]) )
+				da_xz += const * ( d9 * (F[i+2][j+1] * C[i][j] - E[i+2][j+1] * S[i][j]) + \
+								d10 * (F[i+2][m-1] * C[i][j] - E[i+2][j-1] * S[i][j]) )
+				da_yz += const * ( d9 * (F[i+2][j+1] * C[i][j] - E[i+2][j+1] * S[i][j]) + \
+								d10 * (F[i+2][j-1] * C[i][j] - E[i+2][j-1] * S[i][j]) )
+			da_zz = sum([ const * (d6 * (E[i+2][j] * C[i][j] + F[i+2][j] * S[i][j])) for j in range(0, i) ])
 	
 		
 		
@@ -566,34 +532,38 @@ if __name__ == "__main__":
 	sixZhang = ob.rv2sixEle_Zhang(initial_rv)
 	time_list = ob.generate_time(start_t="20171231", end_t="20180131")
 
-	number = 100
-	data = pd.read_csv("STK/Moon_1.csv")[:number]	# 取前number个点进行试算
+	number = 40
+	data = pd.read_csv("STK/Moon.csv")[:number]	# 取前number个点进行试算
 	del data["Time (UTCG)"]
 	data *= 1000
 	data.columns = ['x (m)', 'y (m)', 'z (m)', 'vx (m/sec)', 'vy (m/sec)', 'vz (m/sec)']
 	r_array = data[['x (m)', 'y (m)', 'z (m)']].values
 	utc_list = (ob.generate_time(start_t="20171231", end_t="20180101"))[:number]
 	HL = ob.moon_Cbi(utc_list[1])	# 月惯系到月固系的方向余弦矩阵 3*3
-	r_sat, time_utc = r_array[2], utc_list[2]
+	r_sat, time_utc = r_array[1], utc_list[1]
 	r_fixed = np.dot(HL, r_sat)		# 应该在固连系下建立，王正涛
 	rs_norm = np.linalg.norm(r_sat, 2)
 	rf_norm = np.linalg.norm(r_fixed, 2)
 	phi, lamda = atan(r_fixed[2] / sqrt(r_fixed[0]**2+r_fixed[1]**2)), atan(r_fixed[1]/r_fixed[0])
-	a = ob.cart_define(r_fixed)
+	E, F = ob.legendre_cart(r_fixed)
+	V, W = ob.cart_define(r_fixed)
+	pprint((E - V)[31])
+	pprint((F - W)[31])
+	
 	# print(ob.legendre_spher_col(phi, lm=30) - ob.legendre_spher_col_1(pi/2-phi, lm=30))
-	start = time.clock()
-	a1 = np.array([ np.linalg.norm(ob.nonspherGravity(r_sat, time_utc), 2) for (r_sat, time_utc) in zip(r_array, utc_list) ])
-	print("a1 cost: %f" % (time.clock() - start))
-	plt.plot(a1, label="a1 spher")
+	# start = time.clock()
+	# a1 = np.array([ np.linalg.norm(ob.nonspherGravity(r_sat, time_utc), 2) for (r_sat, time_utc) in zip(r_array, utc_list) ])
+	# print("a1 cost: %f" % (time.clock() - start))
+	# plt.plot(a1, label="a1 spher")
 	
-	start = time.clock()
-	a3 = np.array([ np.linalg.norm(ob.nonspherG_cart(r_sat, time_utc), 2) for (r_sat, time_utc) in zip(r_array, utc_list) ])
-	print("a3 cost: %f" % (time.clock() - start))
-	plt.plot(a3, "--", label="a3 cart")
+	# start = time.clock()
+	# a3 = np.array([ np.linalg.norm(ob.nonspherG_cart(r_sat, time_utc), 2) for (r_sat, time_utc) in zip(r_array, utc_list) ])
+	# print("a3 cost: %f" % (time.clock() - start))
+	# plt.plot(a3, "--", label="a3 cart")
 	
-	start = time.clock()
-	a4 = np.array([ np.linalg.norm(ob.nonspherG_cart_1(r_sat, time_utc), 2) for (r_sat, time_utc) in zip(r_array, utc_list) ])
-	print("a4 cost: %f" % (time.clock() - start))
-	plt.plot(a4, "--", label="a4 cart")
-	plt.legend(); plt.show()
+	# start = time.clock()
+	# a4 = np.array([ np.linalg.norm(ob.nonspherG_cart_1(r_sat, time_utc), 2) for (r_sat, time_utc) in zip(r_array, utc_list) ])
+	# print("a4 cost: %f" % (time.clock() - start))
+	# plt.plot(a4, "--", label="a4 cart")
+	# plt.legend(); plt.show()
 	
