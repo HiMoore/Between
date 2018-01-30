@@ -71,6 +71,20 @@ class Orbit:
 		return P
 		
 		
+	def legendre_spher_col_1(self, theta, lm=30):
+		'''计算完全规格化缔合勒让德函数，球坐标形式，张飞-利用函数计算重力场元(公式2.14)，标准向前列递推算法
+		输入：地心余纬theta, rad;		阶次lm
+		输出：可用于向量直接计算的勒让德函数，包含P_00项	np.array'''
+		P = [ np.array([1, 0]), np.array([sqrt(3)*cos(theta), sqrt(3)*sin(theta), 0]) ]
+		for i in range(2, lm+1):	# P[0][0] -- P[30][30]存在，P[i][i+1]均为0
+			p_ij = [ sqrt( (4*i**2-1) / (i**2-j**2) ) * cos(theta) * P[i-1][j] - \
+					sqrt( (2*i+1)*(i+j-1)*(i-j-1) / ((i**2-j**2)*(2*i-3)) ) * P[i-2][j] for j in range(i) ]
+			p_ii = sqrt( (2*i+1)/(2*i) ) * sin(theta) * P[i-1][i-1]
+			p_ij.extend([p_ii, 0])
+			P.append(np.array(p_ij))
+		return np.array(P)
+		
+		
 	def legendre_cart_1(self, r_fixed, Re=RM, l=30, m=30):
 		'''计算缔合勒让德函数，直角坐标形式，王正涛-卫星跟踪卫星测量确定地球重力场(公式4-2-5)
 		输入：月固系下的卫星位置矢量, r_fixed, 		np.array
@@ -91,6 +105,28 @@ class Orbit:
 			Fii = sqrt((2*i+1) / (2*i)) * ( cons_x * F[i-1][i-1] + cons_y * E[i-1][i-1] ) # 钟波/王庆宾此处为加号，王正涛此处为减号
 			Fij.extend([Fii, 0]); F.append(np.array(Fij))
 		return ( E, F )
+		
+		
+	def legendre_cart_1(self, r_fixed, Re=RM, lm=30):
+		'''计算缔合勒让德函数，直角坐标形式，钟波-基于GOCE卫星(公式2.2.12)
+		输入：月固系下的卫星位置矢量, r_fixed, 		np.array
+		输出：直角坐标下的勒让德函数，包含0阶项, 	np.array'''
+		X, Y, Z = r_fixed[0], r_fixed[1], r_fixed[2]
+		r = np.linalg.norm(r_fixed, 2)
+		V = [ np.array([Re/r, 0]), np.array([ sqrt(3)*Z*Re**2/r**3, -sqrt(3)*X*Re**2/r**3, 0]) ]	# 增加负号
+		W = [ np.array([0, 0]), np.array([ 0, -sqrt(3)*Y*Re**2/r**3, 0]) ]		# 增加负号
+		cons_x, cons_y, cons_z, const = X*Re/r**2, Y*Re/r**2, Z*Re/r**2, (Re/r)**2
+		for i in range(2, lm+2):
+			Vij = [ sqrt( (4*i**2-1) / (i**2-j**2) ) * cons_z * V[i-1][j] - \
+					sqrt( (2*i+1)*(i-j-1)*(i+j-1) / ((i**2-j**2)*(2*i-3)) ) * const * V[i-2][j] for j in range(i) ]
+			Vii = -sqrt( (2*i+1) / (2*i) ) * ( cons_x * V[i-1][i-1] - cons_y * W[i-1][i-1] )	# 增加负号
+			Vij.extend([Vii, 0]); V.append(np.array(Vij))
+			
+			Wij = [ sqrt( (4*i**2-1) / (i**2-j**2) ) * cons_z * W[i-1][j] - \
+					sqrt( (2*i+1)*(i-j-1)*(i+j-1) / ((i**2-j**2)*(2*i-3)) ) * const * W[i-2][j] for j in range(i) ]
+			Wii = -sqrt( (2*i+1) / (2*i) ) * ( cons_x * W[i-1][i-1] + cons_y * V[i-1][i-1] )	#钟波/王庆宾此处为加号 # 增加负号
+			Wij.extend([Wii, 0]); W.append(np.array(Wij))
+		return (np.array(V), np.array(W))
 		
 		
 		# test
