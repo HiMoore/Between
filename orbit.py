@@ -8,7 +8,6 @@ from math import *
 from datetime import datetime
 from jplephem.spk import SPK
 from pprint import pprint
-from numba import jit
 
 
 MIU_E, MIU_M, MIU_S = 3.986004415e+14, 4.902801056e+12, 1.327122e+20	#引力系数
@@ -30,9 +29,7 @@ def fn_timer(function):
         t0 = time.time()
         result = function(*args, **kwargs)
         t1 = time.time()
-        print ("%s running: %s seconds" %
-               (function.__name__, str(t1-t0))
-               )
+        print("%s running: %s seconds" %(function.__name__, str(t1-t0)) )
         return result
     return function_timer
 
@@ -465,7 +462,7 @@ class Orbit:
 		E, F = self.legendre_cart(r_fixed, Re, lm)
 		C, S = self.readCoffients(number=495, n=lm)
 		const = miu / Re**3
-		da_x, da_y, da_z = 0, 0, 0
+		da_xx, da_xy, da_xz, da_yz = 0, 0, 0, 0
 		for i in range(0, lm+1):
 			temp = (2*i+1) / (2*i+5)
 			d1 = sqrt( (i+1)*(i+2)*(i+3)*(i+4) * temp/2 )
@@ -508,18 +505,27 @@ class Orbit:
 								d10 * (F[i+2][j-1] * C[i][j] - E[i+2][j-1] * S[i][j]) )
 			da_zz = np.sum(np.array([ const * (d6 * (E[i+2][j] * C[i][j] + F[i+2][j] * S[i][j])) for j in range(0, i) ]))
 		A = np.array([ [da_xx, da_xy, da_xz], [da_xy, 0, da_yz], [da_xz, da_yz, da_zz] ])
-		A = np.dot( np.dot(HL.T, A), HL )
-		J = np.array([ [A[0][0], A[0][1], A[0][2], 0, 0, 0], [A[1][0], 0, A[1][2], 0, 0, 0], [A[2][0], A[2][1], A[2][2], 0, 0, 0], \
-					   [0, 0, 0, 1, 0, 0], [0, 0, 0, 0, 1, 0], [0, 0, 0, 0, 0, 1] ])
-		return J
+		A = (np.dot( np.dot(HL.T, A), HL )).tolist()
+		for i in range(3):
+			A[i].extend([0, 0, 0])
+		A.extend([ [0, 0, 0, 1, 0, 0], [0, 0, 0, 0, 1, 0], [0, 0, 0, 0, 0, 1] ])
+		return np.array(A)
 		
 		
 	def jacobian_third(self, r_sat, time_utc):
-		'''计算第三体引力摄动加速度对(位置, 速度)的偏导数'''
+		'''计算第三体引力摄动加速度对(位置, 速度)的偏导数, 王正涛(3-3-18)'''
 		m2e = self.moon2Earth(time_utc)
 		m2s = self.moon2Sun(time_utc)
 		l1, l2 = m2e - r_sat, m2s - r_sat
-		A = 
+		l1_norm, l2_norm = np.linalg.norm(l1, 2), np.linalg.norm(l2, 2)
+		global MIU_E, MIU_S
+		A = (- ( MIU_E / l1_norm**3 * (np.identity(3) - 3/l1_norm**2 * np.outer(l1, l1)) + \
+				MIU_S / l2_norm**3 * (np.identity(3) - 3/l2_norm**2 * np.outer(l2, l2)) )).tolist()
+		for i in range(3):
+			A[i].extend([0, 0, 0])
+		A.extend([ [0, 0, 0, 1, 0, 0], [0, 0, 0, 0, 1, 0], [0, 0, 0, 0, 0, 1] ])
+		return np.array(A)
+		
 		
 		
 		
@@ -533,7 +539,7 @@ if __name__ == "__main__":
 	sixZhang = ob.rv2sixEle_Zhang(initial_rv)
 	time_list = ob.generate_time(start_t="20171231", end_t="20180131")
 
-	number = 200
+	number = 40
 	data = pd.read_csv("STK/Moon.csv")[:number]	# 取前number个点进行试算
 	del data["Time (UTCG)"]
 	data *= 1000
@@ -546,18 +552,13 @@ if __name__ == "__main__":
 	rs_norm = np.linalg.norm(r_sat, 2)
 	rf_norm = np.linalg.norm(r_fixed, 2)
 	phi, lamda = atan(r_fixed[2] / sqrt(r_fixed[0]**2+r_fixed[1]**2)), atan(r_fixed[1]/r_fixed[0])
-	# E, F = ob.legendre_cart(r_fixed)
-	# V, W = ob.legendre_cart_1(r_fixed)
-	# print(E[:5], "\n\n", V[:5], "\n\n")
-	# print(F[:5], "\n\n", W[:5], "\n\n")
-	# pprint((E - V)[31])
-	# pprint((F - W)[31])
-	# print(ob.legendre_spher_col(phi, lm=30) - ob.legendre_spher_col_1(pi/2-phi, lm=30))
 	
-	start = time.clock()
-	a1 = np.array([ np.linalg.norm(ob.nonspherGravity(r_sat, time_utc), 2) for (r_sat, time_utc) in zip(r_array, utc_list) ])
-	print("a1 cost: %f" % (time.clock() - start))
-	plt.plot(a1, label="a1 spher")
+	
+	print(ob.jacobian_nonspher(r_sat, time_utc))
+	# start = time.clock()
+	# a1 = np.array([ np.linalg.norm(ob.nonspherGravity(r_sat, time_utc), 2) for (r_sat, time_utc) in zip(r_array, utc_list) ])
+	# print("a1 cost: %f" % (time.clock() - start))
+	# plt.plot(a1, label="a1 spher")
 	
 	# start = time.clock()
 	# a3 = np.array([ np.linalg.norm(ob.nonspherG_cart(r_sat, time_utc), 2) for (r_sat, time_utc) in zip(r_array, utc_list) ])
