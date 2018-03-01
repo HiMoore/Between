@@ -5,7 +5,7 @@ import pandas as pd
 from matplotlib import pyplot as plt
 import re
 from math import *
-from datetime import datetime
+from datetime import datetime, timedelta
 from jplephem.spk import SPK
 from pprint import pprint
 
@@ -189,31 +189,31 @@ class Orbit:
 				else atan2(y, x)
 			
 		
-	def orbit_rk4(self, RV, H=120, Time=0, MIU=MIU_E):
+	def orbit_rk4(self, RV, time_utc, H=120):
 		'''四阶龙格库塔法递推位置和速度, single-time				单位
 		输入：	月惯系下相对月球位置速度, np.array					m	m/s
-				积分步长	s;		当前时刻																	
+				当前utc时间;  			积分步长	s;																			
 		输出：	下一时刻月惯系下卫星位置、速度, np.array			m	m/s'''
 		DT = 0.5 * H
-		Drv = self.twobody_dynamic(RV, Time)
-		YS = np.array(RV)
+		Drv = self.comlete_dynamic(RV, time_utc)
+		YS = RV.copy()
 		RK1 = Drv * DT
 		RV = YS + RK1
 		
-		Drv = self.twobody_dynamic(RV, Time+DT)
+		Drv = self.comlete_dynamic(RV, time_utc+timedelta(DT))
 		RK2 = Drv * DT
 		RV = YS + RK2
 		
-		Drv = self.twobody_dynamic(RV, Time+DT)
+		Drv = self.comlete_dynamic(RV, time_utc+timedelta(DT))
 		RK3 = Drv * H
 		RV = YS + RK3
 		
-		Drv = self.twobody_dynamic(RV, Time+H)
+		Drv = self.comlete_dynamic(RV, time_utc+timedelta(H))
 		RV = YS + (2*(RK1+RK3) + 4*RK2 + Drv*H) / 6
-		return np.array(RV)
+		return RV
 		
 	
-	def twobody_dynamic(self, RV, Time, MIU=MIU_E):
+	def twobody_dynamic(self, RV, Time=0, MIU=MIU_M):
 		'''二体动力学方程，仅考虑中心引力u
 		输入：	惯性系下位置速度	m, m/s, np.array
 		输出：	返回d(RV)/dt，动力学增量, np.array'''
@@ -222,6 +222,19 @@ class Orbit:
 		drdv.extend(RV[3:])
 		drdv.extend(-MIU*(RV[:3]) / R_Norm**3)
 		return np.array(drdv)
+		
+		
+	def comlete_dynamic(self, RV, time_utc, miu=MIU_M, Re=RM, lm=30):
+		'''系统完整动力学模型, 暂考虑中心引力，非球形引力，第三天体引力
+		输入：	惯性系下位置速度	m, m/s, np.array
+		输出：	返回d(RV)/dt，动力学增量, np.array,  1*6'''
+		R, V = RV[:3], RV[3:].tolist()
+		F0 = self.centreGravity(R, miu)
+		F1 = self.nonspherG_cart(R, time_utc, miu, Re, lm)
+		F2 = self.thirdSun(R, time_utc) + self.thirdEarth(R, time_utc)
+		F = F0 + F1 + F2
+		V.extend(F)
+		return np.array(V)
 		
 		
 	def generate_time(self, start_t="20171231", end_t="20180101"):
@@ -286,28 +299,6 @@ class Orbit:
 		Rz = lambda z: np.array([[cos(z), sin(z), 0], [-sin(z), cos(z), 0], [0, 0, 1]])
 		HL = np.dot( ( ( Rz(kesai+tao-phi).dot(Rx(-I-theta)) ).dot(Rz(phi)) ).dot(Rx(I)), Rz(omega_moon) )
 		return HL
-		
-		
-	def thirdSun(self, time_utc, r_sat, miu=MIU_S):
-		'''计算太阳对卫星产生的第三天体引力摄动, single-time
-		输入：UTC时间time_utc，卫星相对中心天体的矢量，m, 均为np.array；
-		输出：返回第三体太阳摄动加速度, m/s^2, np.array'''
-		r_sun = self.moon2Sun(time_utc)
-		norm_st = np.linalg.norm(r_sat-r_sun, 2)
-		norm_et = np.linalg.norm(r_sun, 2)
-		a_sun = -miu * ((r_sat-r_sun)/norm_st**3 + r_sun/norm_et**3)
-		return a_sun
-		
-		
-	def thirdEarth(self, time_utc, r_sat, miu=MIU_E):
-		'''计算地球对卫星产生的第三天体引力摄动, single-time
-		输入：UTC时间time_utc，卫星相对中心天体的矢量，m, 均为np.array;
-		输出：返回第三体地球摄动加速度, m/s^2, np.array'''
-		r_earth = self.moon2Earth(time_utc)
-		norm_st = np.linalg.norm(r_sat-r_earth, 2)
-		norm_et = np.linalg.norm(r_earth, 2)
-		a_earth = -miu * ((r_sat-r_earth)/norm_st**3 + r_earth/norm_et**3)
-		return a_earth
 		
 		
 	def readCoffients(self, number=496, n=30):
@@ -436,9 +427,31 @@ class Orbit:
 		g1 = np.array([ax, ay, az])
 		g1 = np.dot(HL.T, g1)	# 将月固系下加速度转换到月惯系下
 		return g1
+			
+		
+	def thirdSun(self, r_sat, time_utc, miu=MIU_S):
+		'''计算太阳对卫星产生的第三天体摄动加速度, single-time
+		输入：UTC时间time_utc，卫星相对中心天体的矢量，m, 均为np.array；
+		输出：返回第三体太阳摄动加速度, m/s^2, np.array'''
+		r_sun = self.moon2Sun(time_utc)
+		norm_st = np.linalg.norm(r_sat-r_sun, 2)
+		norm_et = np.linalg.norm(r_sun, 2)
+		a_sun = -miu * ((r_sat-r_sun)/norm_st**3 + r_sun/norm_et**3)
+		return a_sun
+		
+		
+	def thirdEarth(self, r_sat, time_utc, miu=MIU_E):
+		'''计算地球对卫星产生的第三天体摄动加速度, single-time
+		输入：UTC时间time_utc，卫星相对中心天体的矢量，m, 均为np.array;
+		输出：返回第三体地球摄动加速度, m/s^2, np.array'''
+		r_earth = self.moon2Earth(time_utc)
+		norm_st = np.linalg.norm(r_sat-r_earth, 2)
+		norm_et = np.linalg.norm(r_earth, 2)
+		a_earth = -miu * ((r_sat-r_earth)/norm_st**3 + r_earth/norm_et**3)
+		return a_earth
 		
 
-	def solarPress(self, beta_last, time_utc, r_sat, step=120):
+	def solarPress(self, beta_last, r_sat, time_utc, step=120):
 		'''计算太阳光压摄动, single-time
 		输入：beta = (1+ita)*S(t);  utc时间(datetime);	卫星位置矢量，m, np.array
 		输出：返回太阳光压在r_sat处造成的摄动, np.array'''
@@ -449,14 +462,14 @@ class Orbit:
 		norm_delta = np.linalg.norm(delta, 2)
 		# 计算太阳光压摄动中的系数，使用随机漫步过程模拟
 		v = np.random.normal(0, 1)	# 0均值，协方差为1的高斯白噪声序列
-		sigma = np.random.normal(0, 1)	#不知道是个什么东西，暂时作为噪声处理
+		sigma = 9.18e-5	# 给定的仿真参数
 		beta = beta_last + sigma*sqrt(step)*v
 		F = beta * ro*(delta_0**2/norm_delta**2) * delta/norm_delta
-		return F
-		
-		
-	def jacobian_nonspher(self, r_sat, time_utc, miu=MIU_M, Re=RM, lm=30):
-		'''计算非球形引力加速度的Jacobian矩阵，非球形引力加速度对(位置, 速度)的偏导数矩阵，王正涛-卫星跟踪卫星(4-3-12)'''
+		return (F, beta)
+
+			
+	def partial_nonspher(self, r_sat, time_utc, miu=MIU_M, Re=RM, lm=30):
+		'''计算非球形引力加速度 对 位置 的偏导数矩阵，王正涛-卫星跟踪卫星(4-3-12), 对速度为0阵'''
 		HL = self.moon_Cbi(time_utc)	# 月惯系到月固系的方向余弦矩阵 3*3
 		r_fixed = np.dot(HL, r_sat)		# 转换为月固系下的位置矢量
 		E, F = self.legendre_cart(r_fixed, Re, lm+1)
@@ -507,66 +520,49 @@ class Orbit:
 			da_zz = np.sum( np.array([ const * (sqrt( (i-j+1)*(i-j+2)*(i+j+1)*(i+j+2) * temp ) * \
 							(E[i+2][j] * C[i][j] + F[i+2][j] * S[i][j])) for j in range(0, i) ]) )
 		A = np.array([ [da_xx, da_xy, da_xz], [da_xy, 0, da_yz], [da_xz, da_yz, da_zz] ])
-		A = (np.dot( np.dot(HL.T, A), HL )).tolist()
-		list(map(lambda L, i: L.extend([0,0,0]), A, range(3)))
-		A.extend([ [0, 0, 0, 1, 0, 0], [0, 0, 0, 0, 1, 0], [0, 0, 0, 0, 0, 1] ])
-		return np.array(A)
-		
-		
-	def jacobian_nonspher_1(self, r_sat, time_utc, miu=MIU_M, Re=RM, lm=30):
-		'''计算非球形引力加速度的Jacobian矩阵，非球形引力加速度对(位置, 速度)的偏导数矩阵，钟波-基于GOCE(2.2.16)'''
-		HL = self.moon_Cbi(time_utc)	# 月惯系到月固系的方向余弦矩阵 3*3
-		r_fixed = np.dot(HL, r_sat)		# 转换为月固系下的位置矢量
-		V, W = self.legendre_cart(r_fixed, Re, lm+1)
-		C, S = self.readCoffients(number=495, n=lm)
-		const = miu / Re**3
-		V_xx, V_xy, V_xz, V_yy, V_yz = 0, 0, 0, 0, 0
-		for i in range(2, lm+1):
-			temp = (2*i+1)/(2*i+5)
-			a5, a6 = sqrt( (i+1)*(i+2)*(i+3)*(i+4) * temp/2 ), sqrt(temp)
-			a7, a8 = sqrt( (i+2)*(i+3)*(i+4)*(i+5) * temp/2 ), sqrt((i+2)*(i+3)/(i*(i+1)) * temp)
-			a12, a14_1 = sqrt( (i+2)*(i+3) * temp/2 ), sqrt( 2*temp / (i*(i+1)) )
-			a13_1 = sqrt( (i+2)*(i+3)*(i+4)/i * temp )
-			con_x, con_z = i*(i+1)*a8, i*(i+1)*(i+2)/2 * a14_1
-			# j=0和j=1时, ax对X的偏导
-			V_xx += const/2 * (a5 * C[i][0] * V[i+2][2] - (i+1)*(i+2)*a6 * C[i][0] * V[i+2][0])
-			V_xx += const/4 * ( a7 * (C[i][1] * V[i+2][3] + S[i][1] * W[i+2][3]) - \
-						i*(i+1)*a8 * (3*C[i][1] * V[i+2][1] + S[i][1] * W[i+2][1]) )
-			# j=0和j=1时, ax对Y的偏导, 也是ay对X的偏导
-			V_xy += const/2 * (a5 * C[i][0] * W[i+2][2])
-			V_xy += const/4 * ( a7 * (C[i][1] * W[i+2][3] - S[i][1] * V[i+2][3]) - \
-						i*(i+1)*a8 * (C[i][1] * W[i+2][1] + S[i][1] * V[i+2][1]) )
-			# j=0和j=1时, ax对Z的偏导, 也是az对X的偏导	
-			V_xz += const * ((i+1)*a12 * C[i][0] * V[i+2][1])
-			V_xz += const * ( i/2*a13_1 * (C[i][1] * V[i+2][2] + S[i][1] * W[i+2][2]) - \
-						i*(i+1)*(i+2)/2 * a14_1 * (C[i][1] * V[i+2][0] + S[i][1] * W[i+2][0]) )
-			# 增加j=0和j=1时, ay对Y的偏导
-			V_yy += const/2 * (-a5 * C[i][0] * V[i+2][2] - (i+1)*(i+2)*a6 * C[i][0] * V[i+2][0])
-			V_yy += const/4 * (-a7 * (C[i][1] * V[i+2][3] + S[i][1] * W[i+2][3]) - \
-						i*(i+1)*a8 * (C[i][1] * V[i+2][1] + 3 * S[i][1] * W[i+2][1]) )
-			# j=0和j=1时, ay对Z的偏导, 也是az对Y的偏导
-			V_yz += const * ((i+1)*a12 * C[i][0] * W[i+2][1])
-			V_yz += const * (i/2*a13_1 * (C[i][1] * W[i+2][2] - S[i][1] * V[i+2][2]) + \
-						i*(i+1)*(i+2)/2 * a14_1 * (C[i][1] * W[i+2][0] - S[i][1] * V[i+2][0]) )
+		A = np.dot( np.dot(HL.T, A), HL )	# 变换到惯性系下
+		return A	# 3*3
 			
-		
-		
-		
-	def jacobian_third(self, r_sat, time_utc):
-		'''计算第三体引力摄动加速度对(位置, 速度)的偏导数, 王正涛(3-3-18)'''
+
+	def partial_third(self, r_sat, time_utc):
+		'''计算第三体引力摄动加速度 对 位置 的偏导数矩阵, 王正涛(3-3-18), 对速度为0阵'''
 		m2e = self.moon2Earth(time_utc)
 		m2s = self.moon2Sun(time_utc)
 		l1, l2 = m2e - r_sat, m2s - r_sat
 		l1_norm, l2_norm = np.linalg.norm(l1, 2), np.linalg.norm(l2, 2)
 		global MIU_E, MIU_S
-		A = (- ( MIU_E / l1_norm**3 * (np.identity(3) - 3/l1_norm**2 * np.outer(l1, l1)) + \
-				MIU_S / l2_norm**3 * (np.identity(3) - 3/l2_norm**2 * np.outer(l2, l2)) )).tolist()
-		for i in range(3):
-			A[i].extend([0.0, 0.0, 0.0])
-		A.extend([ [0, 0, 0, 1, 0, 0], [0, 0, 0, 0, 1, 0], [0, 0, 0, 0, 0, 1] ])
-		return np.array(A)
+		A = - ( MIU_E / l1_norm**3 * (np.identity(3) - 3/l1_norm**2 * np.outer(l1, l1)) + \
+				MIU_S / l2_norm**3 * (np.identity(3) - 3/l2_norm**2 * np.outer(l2, l2)) )
+		return A	# 3*3
+		
+	
+	def jacobian_single(self, r_sat, time_utc):
+		'''计算惯性系下，单颗卫星状态的Jacobian矩阵'''
+		partial = self.partial_nonspher(r_sat, time_utc) + self.partial_third(r_sat, time_utc) 	# partial 3*3
+		low = np.hstack( (partial, np.zeros((3,3))) )	# low 3*6
+		up = np.hstack( (np.zeros((3,3)), np.identity(3)) )	# up 3*6
+		J = np.vstack( (up, low) )
+		return np.array(J)
 		
 		
+	def draw_accelerate(self):
+		'''绘制各种摄动加速度曲线'''
+		number = 722
+		data = pd.read_csv("STK/Moon.csv")[:number]	# 取前number个点进行试算
+		del data["Time (UTCG)"]
+		data *= 1000
+		data.columns = ['x (m)', 'y (m)', 'z (m)', 'vx (m/sec)', 'vy (m/sec)', 'vz (m/sec)']
+		r_array = data[['x (m)', 'y (m)', 'z (m)']].values
+		utc_list = (ob.generate_time(start_t="20171231", end_t="20180101"))[:number]
+		g0 = [ np.linalg.norm( self.centreGravity(r_sat, miu=MIU_M), 2 ) for r_sat in r_array ]
+		g1 = [ np.linalg.norm( self.nonspherGravity(r_sat, time_utc, miu=MIU_M), 2 ) for r_sat, time_utc in zip(r_array, utc_list) ]
+		g2 = [ np.linalg.norm( self.thirdEarth(r_sat, time_utc), 2 ) for r_sat, time_utc in zip(r_array, utc_list) ]
+		g3 = [ np.linalg.norm( self.thirdSun(r_sat, time_utc), 2 ) for r_sat, time_utc in zip(r_array, utc_list) ]
+		g4, beta_last = [], 0
+		for r_sat, time_utc in zip(r_array, utc_list):
+			g, bata = np.linalg.norm( self.solarPress(beta_last, r_sat, time_utc), 2 )
+			g4.append(g)
+			beta_last = beta
 		
 		
 		
@@ -577,7 +573,6 @@ if __name__ == "__main__":
 	ob = Orbit(rv = initial_rv)
 	sixGeng = ob.rv2sixEle_Geng(initial_rv)
 	sixZhang = ob.rv2sixEle_Zhang(initial_rv)
-	time_list = ob.generate_time(start_t="20171231", end_t="20180131")
 
 	number = 40
 	data = pd.read_csv("STK/Moon.csv")[:number]	# 取前number个点进行试算
@@ -593,9 +588,8 @@ if __name__ == "__main__":
 	rf_norm = np.linalg.norm(r_fixed, 2)
 	phi, lamda = atan(r_fixed[2] / sqrt(r_fixed[0]**2+r_fixed[1]**2)), atan(r_fixed[1]/r_fixed[0])
 	
-	
-	pprint(ob.jacobian_nonspher_1(r_sat, time_utc))
-	pprint(ob.jacobian_third(r_sat, time_utc))
+	# pprint(ob.jacobian_single(r_sat, time_utc))
+	dx = ob.orbit_rk4(data.loc[0].values, time_utc, H=120)
 	# start = time.clock()
 	# a1 = np.array([ np.linalg.norm(ob.nonspherGravity(r_sat, time_utc), 2) for (r_sat, time_utc) in zip(r_array, utc_list) ])
 	# print("a1 cost: %f" % (time.clock() - start))

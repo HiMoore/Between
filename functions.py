@@ -305,7 +305,113 @@ class Orbit:
 		DX.extend(a)
 		return DX
 		
-	
+		
+	def jacobian_nonspher_1(self, r_sat, time_utc, miu=MIU_M, Re=RM, lm=30):
+		'''计算非球形引力加速度的Jacobian矩阵，非球形引力加速度对(位置, 速度)的偏导数矩阵，钟波-基于GOCE(2.2.16)'''
+		HL = self.moon_Cbi(time_utc)	# 月惯系到月固系的方向余弦矩阵 3*3
+		r_fixed = np.dot(HL, r_sat)		# 转换为月固系下的位置矢量
+		V, W = self.legendre_cart(r_fixed, Re, lm+1)
+		C, S = self.readCoffients(number=495, n=lm)
+		const = miu / Re**3
+		V_xx, V_xy, V_xz, V_yy, V_yz = 0, 0, 0, 0, 0
+		for i in range(2, lm+1):
+			temp = (2*i+1)/(2*i+5)
+			a5, a6 = sqrt( (i+1)*(i+2)*(i+3)*(i+4) * temp/2 ), sqrt(temp)
+			a7, a8 = sqrt( (i+2)*(i+3)*(i+4)*(i+5) * temp/2 ), sqrt((i+2)*(i+3)/(i*(i+1)) * temp)
+			a12, a14_1 = sqrt( (i+2)*(i+3) * temp/2 ), sqrt( 2*temp / (i*(i+1)) )
+			a13_1 = sqrt( (i+2)*(i+3)*(i+4)/i * temp )
+			con_x, con_z = i*(i+1)*a8, i*(i+1)*(i+2)/2 * a14_1
+			# j=0和j=1时, ax对X的偏导
+			V_xx += const/2 * (a5 * C[i][0] * V[i+2][2] - (i+1)*(i+2)*a6 * C[i][0] * V[i+2][0])
+			V_xx += const/4 * ( a7 * (C[i][1] * V[i+2][3] + S[i][1] * W[i+2][3]) - \
+						i*(i+1)*a8 * (3*C[i][1] * V[i+2][1] + S[i][1] * W[i+2][1]) )
+			# j=0和j=1时, ax对Y的偏导, 也是ay对X的偏导
+			V_xy += const/2 * (a5 * C[i][0] * W[i+2][2])
+			V_xy += const/4 * ( a7 * (C[i][1] * W[i+2][3] - S[i][1] * V[i+2][3]) - \
+						i*(i+1)*a8 * (C[i][1] * W[i+2][1] + S[i][1] * V[i+2][1]) )
+			# j=0和j=1时, ax对Z的偏导, 也是az对X的偏导	
+			V_xz += const * ((i+1)*a12 * C[i][0] * V[i+2][1])
+			V_xz += const * ( i/2*a13_1 * (C[i][1] * V[i+2][2] + S[i][1] * W[i+2][2]) - \
+						i*(i+1)*(i+2)/2 * a14_1 * (C[i][1] * V[i+2][0] + S[i][1] * W[i+2][0]) )
+			# 增加j=0和j=1时, ay对Y的偏导
+			V_yy += const/2 * (-a5 * C[i][0] * V[i+2][2] - (i+1)*(i+2)*a6 * C[i][0] * V[i+2][0])
+			V_yy += const/4 * (-a7 * (C[i][1] * V[i+2][3] + S[i][1] * W[i+2][3]) - \
+						i*(i+1)*a8 * (C[i][1] * V[i+2][1] + 3 * S[i][1] * W[i+2][1]) )
+			# j=0和j=1时, ay对Z的偏导, 也是az对Y的偏导
+			V_yz += const * ((i+1)*a12 * C[i][0] * W[i+2][1])
+			V_yz += const * (i/2*a13_1 * (C[i][1] * W[i+2][2] - S[i][1] * V[i+2][2]) + \
+						i*(i+1)*(i+2)/2 * a14_1 * (C[i][1] * W[i+2][0] - S[i][1] * V[i+2][0]) )
+		
+	def jacobian_nonspher(self, r_sat, time_utc, miu=MIU_M, Re=RM, lm=30):
+		'''计算非球形引力加速度的Jacobian矩阵，非球形引力加速度对(位置, 速度)的偏导数矩阵，王正涛-卫星跟踪卫星(4-3-12)'''
+		HL = self.moon_Cbi(time_utc)	# 月惯系到月固系的方向余弦矩阵 3*3
+		r_fixed = np.dot(HL, r_sat)		# 转换为月固系下的位置矢量
+		E, F = self.legendre_cart(r_fixed, Re, lm+1)
+		C, S = self.readCoffients(number=495, n=lm)
+		const = miu / Re**3
+		da_xx, da_xy, da_xz, da_yz = 0, 0, 0, 0
+		for i in range(2, lm+1):
+			temp = (2*i+1) / (2*i+5)
+			d1 = sqrt( (i+1)*(i+2)*(i+3)*(i+4) * temp/2 )
+			d2 = sqrt( (i+1)**2 * (i+2)**2 * temp )
+			d3 = sqrt( (i+2)*(i+3)*(i+4)*(i+5) * temp/2 )
+			d4 = sqrt( i*(i+1)*(i+2)*(i+3) * temp )
+			d8 = sqrt( (i+1)**2 * (i+2)*(i+3) * temp/2 )
+			# j=0和j=1时, ax对X的偏导
+			da_xx += const/2 * ( d1 * (E[i+2][2] * C[i][0]) - d2 * (E[i+2][0] * C[i][0]) ) 
+			da_xx += const/4 * ( d3 * (E[i+2][3] * C[i][1] + F[i+2][3] * S[i][1]) + \
+								d4 * (-3*E[i+2][1] * C[i][1] - F[i+2][1] * S[i][1]) )
+			# j=0和j=1时, ax对Y的偏导, 也是ay对X的偏导		
+			da_xy += const/2 * ( d1 * (F[i+2][2] * C[i][0]) )
+			da_xy += const/4 * ( d3 * (F[i+2][3] * C[i][1] - E[i+2][3] * S[i][1]) + \
+								d4 * (-F[i+2][3] * C[i][1] - E[i+2][1] * S[i][1]) )
+			# j=0和j=1时, ax对Z的偏导, 也是az对X的偏导	
+			da_xz += const * ( d8 * (E[i+2][1] * C[i][0]) )		# j=0时, ax对Z的偏导
+			d9_1 = sqrt( i*(i+2)*(i+3)*(i+4) * temp/4 )
+			d10_1 = sqrt( i*(i+1)*(i+2)**2 / (2*temp) )
+			da_xz += const * ( d9_1 * (E[i+2][2] * C[i][1] + F[i+2][2] * S[i][1]) + \
+							d10_1 * (-E[i+2][0] * C[i][1] - F[i+2][0] * S[i][1]) )		# j=1时, ax对Z的偏导
+			# j=0和j=1时, ay对Z的偏导, 也是az对Y的偏导	
+			da_yz += const * ( d8 * (F[i+2][1] * C[i][0]) )
+			da_yz += const * ( d9_1 * (F[i+2][1] * C[i][1] - E[i+2][2] * S[i][1]) + 
+							d10_1 * (F[i+2][0] * C[i][0] - E[i+2][0] * S[i][1]) )
+			for j in range(2, i):
+				d5 = sqrt( (i+j+1)*(i+j+2)*(i+j+3)*(i+j+4) * temp )
+				d6 = sqrt( (i-j+1)*(i-j+2)*(i+j+1)*(i+j+2) * temp )
+				d7 = sqrt( (i-j+1)*(i-j+2)*(i-j+3)*(i-j+4)*(i+j+1)*(i+j+2) * temp ) if j != 2 \
+						else sqrt( (i+3)*(i+4) / ((i+1)*(i+2)) * temp )
+				d9 = sqrt( (i-j+1)*(i+j+1)*(i+j+2)*(i+j+3) * temp/4 )
+				d10 = sqrt( (i-j+1)*(i-j+2)*(i-j+3)*(i-j+4)*(i+j+1) * temp / 4 )
+				da_xx += const/4 * ( d5 * (E[i+2][j+2] * C[i][j] + F[i+2][j+2] * S[i][j]) + \
+								   2*d6 * (-E[i+2][j] * C[i][j] - F[i+2][j] * S[i][j]) + \
+								   2*d7 * (E[i+2][j-2] * C[i][j] - F[i+2][j-2] * S[i][j]) )
+				da_xy += const/4 * ( d5 * (F[i+2][j+2] * C[i][j] - E[i+2][j+2] * S[i][j]) + \
+								   2*d7 * (-F[i+2][j-2] * C[i][j] + F[i+2][j-2] * S[i][j]) )
+				da_xz += const * ( d9 * (E[i+2][j+1] * C[i][j] + F[i+2][j+1] * S[i][j]) + \
+								d10 * (-E[i+2][j-1] * C[i][j] - F[i+2][j-1] * S[i][j]) )
+				da_yz += const * ( d9 * (F[i+2][j+1] * C[i][j] - E[i+2][j+1] * S[i][j]) + \
+								d10 * (F[i+2][j-1] * C[i][j] - E[i+2][j-1] * S[i][j]) )
+			da_zz = np.sum( np.array([ const * (sqrt( (i-j+1)*(i-j+2)*(i+j+1)*(i+j+2) * temp ) * \
+							(E[i+2][j] * C[i][j] + F[i+2][j] * S[i][j])) for j in range(0, i) ]) )
+		A = np.array([ [da_xx, da_xy, da_xz], [da_xy, 0, da_yz], [da_xz, da_yz, da_zz] ])
+		A = (np.dot( np.dot(HL.T, A), HL )).tolist()
+		list(map(lambda L, i: L.extend([0,0,0]), A, range(3)))
+		J = [ [0, 0, 0, 1, 0, 0], [0, 0, 0, 0, 1, 0], [0, 0, 0, 0, 0, 1] ] ;  J.extend(A)
+		return np.array(J)
+			
+
+	def jacobian_third(self, r_sat, time_utc):
+		'''计算第三体引力摄动加速度对(位置, 速度)的偏导数, 王正涛(3-3-18)'''
+		m2e = self.moon2Earth(time_utc)
+		m2s = self.moon2Sun(time_utc)
+		l1, l2 = m2e - r_sat, m2s - r_sat
+		l1_norm, l2_norm = np.linalg.norm(l1, 2), np.linalg.norm(l2, 2)
+		global MIU_E, MIU_S
+		A = (- ( MIU_E / l1_norm**3 * (np.identity(3) - 3/l1_norm**2 * np.outer(l1, l1)) + \
+				MIU_S / l2_norm**3 * (np.identity(3) - 3/l2_norm**2 * np.outer(l2, l2)) )).tolist()
+		list(map(lambda L, i: L.extend([0,0,0]), A, range(3)))
+		J = np.zeros((3,6)) ;  J.extend(A)
+		return np.array(J)
 		
 		
 		
