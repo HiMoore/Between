@@ -547,22 +547,47 @@ class Orbit:
 		
 	def draw_accelerate(self):
 		'''绘制各种摄动加速度曲线'''
-		number = 722
+		number, step = 722, 120
 		data = pd.read_csv("STK/Moon.csv")[:number]	# 取前number个点进行试算
 		del data["Time (UTCG)"]
 		data *= 1000
 		data.columns = ['x (m)', 'y (m)', 'z (m)', 'vx (m/sec)', 'vy (m/sec)', 'vz (m/sec)']
 		r_array = data[['x (m)', 'y (m)', 'z (m)']].values
 		utc_list = (ob.generate_time(start_t="20171231", end_t="20180101"))[:number]
-		g0 = [ np.linalg.norm( self.centreGravity(r_sat, miu=MIU_M), 2 ) for r_sat in r_array ]
-		g1 = [ np.linalg.norm( self.nonspherGravity(r_sat, time_utc, miu=MIU_M), 2 ) for r_sat, time_utc in zip(r_array, utc_list) ]
-		g2 = [ np.linalg.norm( self.thirdEarth(r_sat, time_utc), 2 ) for r_sat, time_utc in zip(r_array, utc_list) ]
-		g3 = [ np.linalg.norm( self.thirdSun(r_sat, time_utc), 2 ) for r_sat, time_utc in zip(r_array, utc_list) ]
+		g0 = np.array([ np.linalg.norm( self.centreGravity(r_sat, miu=MIU_M), 2 ) for r_sat in r_array ])
+		g1 = np.array([ np.linalg.norm( self.nonspherGravity(r_sat, time_utc, miu=MIU_M), 2 ) for r_sat, time_utc in zip(r_array, utc_list) ])
+		g2 = np.array([ np.linalg.norm( self.thirdEarth(r_sat, time_utc), 2 ) for r_sat, time_utc in zip(r_array, utc_list) ])
+		g3 = np.array([ np.linalg.norm( self.thirdSun(r_sat, time_utc), 2 ) for r_sat, time_utc in zip(r_array, utc_list) ])
 		g4, beta_last = [], 0
 		for r_sat, time_utc in zip(r_array, utc_list):
-			g, bata = np.linalg.norm( self.solarPress(beta_last, r_sat, time_utc), 2 )
+			f, beta = self.solarPress(beta_last, r_sat, time_utc)
+			g = np.linalg.norm(f, 2)
 			g4.append(g)
 			beta_last = beta
+		g4 = np.array(g4)
+		time = range(0,(number-1)*step, step)
+		g = g0 + g1 + g2 + g3 + g4
+		plt.figure(1, (10,7))
+		plt.plot(time, g0, "r-", label="centre accelerate")
+		plt.plot(time, g, "g--", label="complete accelerate")
+		plt.xlabel("Time / s", fontsize=18); plt.ylabel(r"$a / (m/s^2)$", fontsize=18)
+		plt.tick_params(labelsize=16)
+		plt.title("centre accelerate and complete accelerate", fontsize=18); plt.legend(loc=1, fontsize=16)
+		
+		plt.figure(2, (10,7))
+		plt.plot(time, g1, "r-", label="nonspher accelerate")
+		plt.plot(time, g2, "g--", label="earth accelerate")
+		plt.xlabel("Time / s", fontsize=18); plt.ylabel(r"$a / (m/s^2)$", fontsize=18)
+		plt.tick_params(labelsize=16)
+		plt.title("acceleration of perturbation", fontsize=18); plt.legend(loc=1, fontsize=16)
+		
+		plt.figure(3, (10,7))
+		plt.plot(time, g3, "b-.", label="sun accelerate")
+		plt.plot(time, g4, "r-", label="solar-pressure accelerate")
+		plt.xlabel("Time / s", fontsize=18); plt.ylabel(r"$a / (m/s^2)$", fontsize=18)
+		plt.tick_params(labelsize=16)
+		plt.title("acceleration of perturbation", fontsize=18); plt.legend(loc=1, fontsize=16)
+		plt.show()
 		
 		
 		
@@ -588,8 +613,10 @@ if __name__ == "__main__":
 	rf_norm = np.linalg.norm(r_fixed, 2)
 	phi, lamda = atan(r_fixed[2] / sqrt(r_fixed[0]**2+r_fixed[1]**2)), atan(r_fixed[1]/r_fixed[0])
 	
+	ob.draw_accelerate()
+	
 	# pprint(ob.jacobian_single(r_sat, time_utc))
-	dx = ob.orbit_rk4(data.loc[0].values, time_utc, H=120)
+	# dx = ob.orbit_rk4(data.loc[0].values, time_utc, H=120)
 	# start = time.clock()
 	# a1 = np.array([ np.linalg.norm(ob.nonspherGravity(r_sat, time_utc), 2) for (r_sat, time_utc) in zip(r_array, utc_list) ])
 	# print("a1 cost: %f" % (time.clock() - start))
