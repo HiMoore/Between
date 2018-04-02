@@ -28,15 +28,20 @@ class STK_Simulation:
 		SA_dm1_neg = pd.read_csv("STK/Sat_A J2000_-DM1.csv")[:number]
 		SA_de_pos = pd.read_csv("STK/Sat_A J2000_+De.csv")[:number]
 		SA_de_neg = pd.read_csv("STK/Sat_A J2000_-De.csv")[:number]
-		SB_origin = pd.read_csv("STK/Sat_b J2000_Origin.csv")[:number]
+		SA_dw_pos = pd.read_csv("STK/Sat_A J2000_+Dw.csv")[:number]
+		SA_dw_neg = pd.read_csv("STK/Sat_A J2000_-Dw.csv")[:number]
+		
+		SB_origin = pd.read_csv("STK/Sat_B J2000_Origin.csv")[:number]
 		SB_dm0_pos = pd.read_csv("STK/Sat_B J2000_+DM0.csv")[:number]
 		SB_dm0_neg = pd.read_csv("STK/Sat_B J2000_-DM0.csv")[:number]
 		SB_dm1_pos = pd.read_csv("STK/Sat_B J2000_+DM1.csv")[:number]
 		SB_dm1_neg = pd.read_csv("STK/Sat_B J2000_-DM1.csv")[:number]
 		SB_de_pos = pd.read_csv("STK/Sat_B J2000_+De.csv")[:number]
 		SB_de_neg = pd.read_csv("STK/Sat_B J2000_-De.csv")[:number]
-		sat_list = [ SA_origin, SA_dm0_pos, SA_dm0_neg, SA_dm1_pos, SA_dm1_neg, SA_de_pos, SA_de_neg, \
-					 SB_origin, SB_dm0_pos, SB_dm0_neg, SB_dm1_pos, SB_dm1_neg, SB_de_pos, SB_de_neg ]
+		SB_dw_pos = pd.read_csv("STK/Sat_B J2000_+Dw.csv")[:number]
+		SB_dw_neg = pd.read_csv("STK/Sat_B J2000_-Dw.csv")[:number]
+		sat_list = [ SA_origin, SA_dm0_pos, SA_dm0_neg, SA_dm1_pos, SA_dm1_neg, SA_de_pos, SA_de_neg, SA_dw_pos, SA_dw_neg, \
+					 SB_origin, SB_dm0_pos, SB_dm0_neg, SB_dm1_pos, SB_dm1_neg, SB_de_pos, SB_de_neg, SB_dw_pos, SB_dw_neg]
 		for ele in sat_list:
 			del ele["Time (UTCG)"]
 			ele *= 1000
@@ -46,8 +51,8 @@ class STK_Simulation:
 	
 	def b_minus_a(self, sat_list):
 		'''计算不同变动参数下的rBA = rB - rA'''
-		minus_list = [sat_list[i+7] - sat_list[i] for i in range(7)]
-		return minus_list  # [origin, dm0_posi, dm0_nega, dm1_posi, dm1_nega, de_posi, de_nega]
+		minus_list = [sat_list[i+7] - sat_list[i] for i in range(9)]
+		return minus_list  # [origin, dm0_posi, dm0_nega, dm1_posi, dm1_nega, de_posi, de_nega, dw_posi, dw_nega]
 		
 		
 	def line_of_nodes(self, sat_info):
@@ -71,9 +76,9 @@ class STK_Simulation:
 		
 	def delta_modr_angle(self, minus_list, N_unit):
 		'''计算rBA的长度变化，以及rBA与节点矢量的夹角变化'''
-		modr_angles = [ self.modr_angle(minus_list[i], N_unit) for i in range(7) ]  # [ [modr, angle], [modr, angle] ]
-		delta_modr = [ modr_angles[i][0] - modr_angles[0][0] for i in range(1, 7) ] # 与origin的modr, angle作差，求变化值
-		delta_angle = [ modr_angles[i][1] - modr_angles[0][1] for i in range(1, 7) ]
+		modr_angles = [ self.modr_angle(minus_list[i], N_unit) for i in range(9) ]  # [ [modr, angle], [modr, angle] ]
+		delta_modr = [ modr_angles[i][0] - modr_angles[0][0] for i in range(1, 9) ] # 与origin的modr, angle作差，求变化值
+		delta_angle = [ modr_angles[i][1] - modr_angles[0][1] for i in range(1, 9) ]
 		return [delta_modr, delta_angle]
 		
 		
@@ -111,6 +116,19 @@ class STK_Simulation:
 		plt.plot(range(0, Time, self.step), delta_angle[4], "g-", label=r"$△e_A = △e_B = +0.0001$")
 		plt.plot(range(0, Time, self.step), delta_angle[5], "r--", label=r"$△e_A = -△e_B = 0.00002$")
 		plt.legend(fontsize=18)
+		
+		plt.figure(4); 
+		plt.subplot(211); plt.xlabel("Time / s", fontsize=18); plt.ylabel("△ρ / m", fontsize=18)
+		plt.plot(range(0, Time, self.step), np.abs(delta_modr[6]), "g-", label=r"$△w_{0A} = △w_{0B} = +0.02°$")
+		plt.plot(range(0, Time, self.step), np.abs(delta_modr[7]), "r--", label=r"$△w_{0A} = -△w_{0B} = -0.004°$")
+		plt.legend(fontsize=18)
+		
+		plt.subplot(212); plt.xlabel("Time / s", fontsize=18); plt.ylabel("△ψ / °", fontsize=18)
+		plt.plot(range(0, Time, self.step), np.abs(delta_angle[6]), "g-", label=r"$△M_{0A} = △M_{0B}=+0.02°$")
+		plt.plot(range(0, Time, self.step), np.abs(delta_angle[7]), "r--", label=r"$△M_{0A} = -△M_{0B}=-0.004°$")
+		plt.legend(fontsize=18)
+		
+		
 		plt.show()
 		
 
@@ -161,7 +179,7 @@ class STK_Simulation:
 if __name__ == "__main__":
 	stk = STK_Simulation()
 	Sat_list = stk.get_data()
-	minus_list = [origin, dm0_posi, dm0_nega, dm1_posi, dm1_nega, de_posi, de_nega] = stk.b_minus_a(Sat_list)
+	minus_list = [origin, dm0_posi, dm0_nega, dm1_posi, dm1_nega, de_posi, de_nega, dw_posi, dw_nega] = stk.b_minus_a(Sat_list)
 	N_unit = stk.line_of_nodes(Sat_list[0])
 	[delta_modr, delta_angle] = stk.delta_modr_angle(minus_list, N_unit)
 	stk.draw_change(delta_modr, delta_angle)

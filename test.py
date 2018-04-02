@@ -1,58 +1,97 @@
-import matplotlib.pyplot as plt
-
-from mpl_toolkits.axes_grid1.inset_locator import zoomed_inset_axes
-from mpl_toolkits.axes_grid1.inset_locator import mark_inset
+# -*- coding: utf-8 -*-
 
 import numpy as np
+import pandas as pd
+from scipy.integrate import solve_ivp, odeint, ode
+from matplotlib import pyplot as plt
+import re
+from math import *
+from datetime import datetime
+from jplephem.spk import SPK
+from orbit import *
+from pprint import pprint
+import matlab.engine
 
-def get_demo_image():
-    from matplotlib.cbook import get_sample_data
-    import numpy as np
-    f = get_sample_data("axes_grid/bivariate_normal.npy", asfileobj=False)
-    z = np.load(f)
-    # z is a numpy array of 15x15
-    return z, (-3,4,-4,3)
 
 
-fig = plt.figure(1, [5,4])
-ax = fig.add_subplot(111)
-# ax = plt.subplot()
+class Test_Orbit(Orbit):
 
-# prepare the demo image
-Z, extent = get_demo_image()
-Z2 = np.zeros([150, 150], dtype="d")
-ny, nx = Z.shape
-Z2[30:30+ny, 30:30+nx] = Z
+	def __init__(self):
+		return
 
-# extent = [-3, 4, -4, 3]
-ax.imshow(Z2, extent=extent, interpolation="nearest",
-          origin="lower")
+	def singleDay_error(self):
+		number, t0 = 720, 0
+		rv_0 = [1837553.088459, -100877.893987, -0.369920, 59.176544, 1077.932044, 1425.301239]
+		HPOP = pd.read_csv("STK/Moon_HPOP.csv")[:number]	# 取前number个点进行试算
+		TwoBody = pd.read_csv("STK/Moon_TwoBody.csv")[:number]	# 取前number个点进行试算
+		del HPOP["Time (UTCG)"]
+		del TwoBody["Time (UTCG)"]
+		HPOP = np.array(HPOP).T
+		TwoBody = np.array(TwoBody).T
+		orbit = self.integrate_orbit(rv_0, number)
+		delta_1 = HPOP - TwoBody
+		delta_2 = orbit - TwoBody
+		delta_3 = HPOP - orbit
+		
+		plt.figure(1)
+		plt.plot(delta_1[0], label="(HPOP - TwoBody)_x")
+		plt.plot(delta_1[1], label="(HPOP - TwoBody)_y")
+		plt.plot(delta_1[2], label="(HPOP - TwoBody)_z")
+		plt.legend()
+		
+		plt.figure(2)
+		plt.plot(delta_2[0], label="(orbit - TwoBody)_x")
+		plt.plot(delta_2[1], label="(orbit - TwoBody)_y")
+		plt.plot(delta_2[2], label="(orbit - TwoBody)_z")
+		plt.legend()
+		
+		plt.figure(3)
+		plt.plot(delta_3[0], label="(HPOP - orbit)_x")
+		plt.plot(delta_3[1], label="(HPOP - orbit)_y")
+		plt.plot(delta_3[2], label="(HPOP - orbit)_z")
+		plt.legend()
+		
+		plt.show()
+		
+		
+	def inertial2fixed(self, r_array, utc_array):
+		HL_array = np.array([ self.moon_Cbi(time_utc) for time_utc in utc_array ])
+		r_fixed = np.array([ np.dot(HL, r_sat) for HL, r_sat in zip(HL_array, r_array) ])
+		return (r_fixed, HL_array)
 
-axins = zoomed_inset_axes(ax, 6, loc=1) # zoom = 6
-axins.imshow(Z2, extent=extent, interpolation="nearest",
-             origin="lower")
 
-# sub region of the original image
-x1, x2, y1, y2 = -1.5, -0.9, -2.5, -1.9
-axins.set_xlim(x1, x2)
-axins.set_ylim(y1, y2)
+if __name__ == "__main__":
 
-axins1 = zoomed_inset_axes(ax, 8, loc=2) # zoom = 6
-axins1.imshow(Z2, extent=extent, interpolation="nearest",
-             origin="lower")
-
-# sub region of the original image
-x1, x2, y1, y2 = -1.2, -0.9, -2.2, -1.9
-axins1.set_xlim(x1, x2)
-axins1.set_ylim(y1, y2)
-
-plt.xticks(visible=False)
-plt.yticks(visible=False)
-
-# draw a bbox of the region of the inset axes in the parent axes and
-# connecting lines between the bbox and the inset axes area
-mark_inset(ax, axins, loc1=2, loc2=4, fc="none", ec="0.5")
-mark_inset(ax, axins1, loc1=2, loc2=4, fc="none", ec="0.5")
-
-plt.draw()
-plt.show()
+	test = Test_Orbit()
+	test.singleDay_error()
+	# eng = matlab.engine.start_matlab()
+	
+	
+	# number = 360
+	# data = pd.read_csv("STK/Moon_HPOP.csv")[:number]	# 取前number个点进行试算
+	# del data["Time (UTCG)"]
+	# r_array = data[['x (m)', 'y (m)', 'z (m)']].values
+	# utc_array = (test.generate_time(start_t="20180101", end_t="20180331"))[:number]
+	# r_fixed, HL_array = test.inertial2fixed(r_array, utc_array)
+	# mat_g = np.array([ np.dot( HL.T, np.array( eng.gravitysphericalharmonic( matlab.double(rf.tolist()), 'LP165P', 30.0, nargout=3 ) ) ) \
+					# for HL, rf in zip(HL_array, r_fixed) ])
+	# py_g = np.array([ test.centreGravity(r_sat)+test.nonspherGravity(r_sat, time_utc) \
+					# for r_sat, time_utc in zip(r_array, utc_array) ])
+	# py_gvec = np.array([ test.centreGravity(r_sat)+test.nonspher_Gvec(r_sat, time_utc) \
+					# for r_sat, time_utc in zip(r_array, utc_array) ])
+	# print(mat_g[:5])
+	# pyg_matg = py_g - mat_g
+	# pyg_vec = py_g - py_gvec
+	# vec_matg = py_gvec - mat_g
+	
+	# plt.figure(1)
+	# plt.plot(pyg_matg)
+	
+	# plt.figure(2)
+	# plt.plot(pyg_vec)
+	
+	# plt.figure(3)
+	# plt.plot(vec_matg)
+	
+	# plt.show()
+	eng.quit()
