@@ -53,7 +53,7 @@ class Orbit:
 		return
 		
 		
-		def LimitUpLow(self, x, x_up, x_low):
+	def LimitUpLow(self, x, x_up, x_low):
 		'''功能：变量限幅
 		输入：变量, 变量上界, 变量下界
 		输出：返回限幅后的变量'''
@@ -152,13 +152,14 @@ class Orbit:
 		'''功能：位置速度到轨道六根数惯性转换, single-time
 		输入：R[3]	位置向量，m;	V[3]	速度向量，m/s
 		输出：SixE[6]：六根数'''
-		R = self.LimitUpLow(sqrt(np.dot(self.r, self.r)), CSD_MAX, 1.0)
-		V = self.LimitUpLow(sqrt(np.dot(self.v, self.v)), CSD_MAX, 1.0)
-		h = np.cross(self.r, self.v)	#角动量
+		r, v = np.array(rv[:3]), np.array(rv[3:])
+		R = self.LimitUpLow(sqrt(np.dot(r, r)), CSD_MAX, 1.0)
+		V = self.LimitUpLow(sqrt(np.dot(v, v)), CSD_MAX, 1.0)
+		h = np.cross(r, v)	#角动量
 		H = sqrt(np.dot(h, h))			#角动量范数
-		Energy =  np.dot(self.v, self.v)/2 - MIU/R		#机械能
+		Energy =  np.dot(v, v)/2 - MIU/R		#机械能
 		a = self.LimitUpLow(R/(2-R*V**2/MIU), CSD_MAX, 1.0)
-		esinE = np.dot(self.r, self.v) / sqrt(a*MIU)
+		esinE = np.dot(r, v) / sqrt(a*MIU)
 		ecosE = 1 - R/a
 		e = self.LimitUpLow(sqrt(esinE**2 + ecosE**2), 1-CSD_EPS, 0)
 		E = self.Atan4(esinE, ecosE)
@@ -166,8 +167,8 @@ class Orbit:
 		H = self.LimitUpLow(H, np.linalg.norm(h, 1)+CSD_EPS, abs(h[2])+CSD_EPS)		
 		i = acos(self.divided(h[2], H))
 		omiga = self.Atan4(h[0], -h[1])
-		ksinu = self.divided(self.r[2], sin(i))
-		kcosu = self.r[0]*cos(omiga) + self.r[1]*sin(omiga)
+		ksinu = self.divided(r[2], sin(i))
+		kcosu = r[0]*cos(omiga) + r[1]*sin(omiga)
 		u = self.Atan4(ksinu, kcosu)
 		w = u - f
 		M = E-esinE
@@ -212,6 +213,28 @@ class Orbit:
 		JDN = time_utc.day + floor((153*m+2)/5) + 365*y + floor(y/4) - floor(y/100) + floor(y/400) - 32045
 		JD = JDN - 0.5 + time_utc.hour/24 + time_utc.minute/1440 + time_utc.second/86400
 		return JD
+		
+		
+	def moon_Cbi(self, time_jd):
+		'''返回月惯系到月固系的方向余弦矩阵, single-time，张巍-月球物理天平动对环月轨道(公式12)'''
+		jd_day = time_jd - 2451545.0	# 自历元J2000起的儒略日数
+		jd_t = jd_day / 36525.0		# 自历元J2000起的儒略世纪数
+		l_moon = mod( radians(134.963413889 + 13.06499315537*jd_day + 0.0089939*jd_day**2), 2*pi )
+		l_sun = mod( radians(357.52910 + 35999.05030*jd_t - 0.0001559*jd_t**2 - 0.0000048*jd_t**3), 2*pi )
+		w_moon = mod( radians(318.308686110 - 6003.1498961*jd_t + 0.0124003*jd_t**2), 2*pi ) #需要化为弧度
+		omega_moon = mod( radians(125.044555556 - 1934.1361850*jd_t + 0.0020767*jd_t**2), 2*pi) #需要化为弧度
+		phi = mod(l_moon + w_moon + pi, 2*pi)
+		I = 0.02691686;
+		tao_1 , tao_2, tao_3 = 2.9e-4, -0.58e-4, -0.87e-4	#张巍(公式3)
+		tao = tao_1*sin(l_sun) + tao_2*sin(l_moon) + tao_3*sin(2*w_moon)
+		rho_1, rho_2, rho_3 = -5.18e-4, 1.8e-4, -0.53e-4	#张巍(公式4)
+		rho = mod( rho_1*cos(l_moon) + rho_2*cos(l_moon+2*w_moon) + rho_3*cos(2*(l_moon+w_moon)), 2*pi )
+		sigma = mod( asin( rho_1*sin(l_moon) + rho_2*sin(l_moon+2*w_moon) + rho_3*sin(2*(l_moon+w_moon)) ) / I, 2*pi )
+		Rx = lambda x: np.array([[1, 0, 0], [0, cos(x), sin(x)], [0, -sin(x), cos(x)]])
+		Ry = lambda y: np.array([[cos(y), 0, -sin(y)], [0, 1, 0], [sin(y),0, cos(x)]])
+		Rz = lambda z: np.array([[cos(z), sin(z), 0], [-sin(z), cos(z), 0], [0, 0, 1]])
+		HL = np.dot( ( ( Rz(phi+tao-sigma).dot(Rx(-I-rho)) ).dot(Rz(sigma)) ).dot(Rx(I)), Rz(omega_moon) )
+		return HL
 		
 		
 	def legendre_spher_row(self, phi, l=30, m=30):
@@ -662,6 +685,83 @@ class Orbit:
 		
 		
 		plt.show()
+		
+		
+	def partial_nonspher(self, r_sat, time_utc, miu=MIU_M, Re=RM, lm=30):
+		'''计算非球形引力加速度 对 位置 的偏导数矩阵，王正涛-卫星跟踪卫星(4-3-12), 对速度为0阵'''
+		HL = self.moon_Cbi(time_utc)	# 月惯系到月固系的方向余弦矩阵 3*3
+		r_fixed = np.dot(HL, r_sat)		# 转换为月固系下的位置矢量
+		E, F = self.legendre_cart(r_fixed, Re, lm+1)
+		C, S = self.readCoffients(number=495, n=lm)
+		const = miu / Re**3
+		da_xx, da_xy, da_xz, da_yz = 0, 0, 0, 0
+		for i in range(2, lm+1):
+			temp = (2*i+1) / (2*i+5)
+			d1 = sqrt( (i+1)*(i+2)*(i+3)*(i+4) * temp/2 )
+			d2 = sqrt( (i+1)**2 * (i+2)**2 * temp )
+			d3 = sqrt( (i+2)*(i+3)*(i+4)*(i+5) * temp/2 )
+			d4 = sqrt( i*(i+1)*(i+2)*(i+3) * temp )
+			d8 = sqrt( (i+1)**2 * (i+2)*(i+3) * temp/2 )
+			# j=0和j=1时, ax对X的偏导
+			da_xx += const/2 * ( d1 * (E[i+2][2] * C[i][0]) - d2 * (E[i+2][0] * C[i][0]) ) 
+			da_xx += const/4 * ( d3 * (E[i+2][3] * C[i][1] + F[i+2][3] * S[i][1]) + \
+								d4 * (-3*E[i+2][1] * C[i][1] - F[i+2][1] * S[i][1]) )
+			# j=0和j=1时, ax对Y的偏导, 也是ay对X的偏导		
+			da_xy += const/2 * ( d1 * (F[i+2][2] * C[i][0]) )
+			da_xy += const/4 * ( d3 * (F[i+2][3] * C[i][1] - E[i+2][3] * S[i][1]) + \
+								d4 * (-F[i+2][3] * C[i][1] - E[i+2][1] * S[i][1]) )
+			# j=0和j=1时, ax对Z的偏导, 也是az对X的偏导	
+			da_xz += const * ( d8 * (E[i+2][1] * C[i][0]) )		# j=0时, ax对Z的偏导
+			d9_1 = sqrt( i*(i+2)*(i+3)*(i+4) * temp/4 )
+			d10_1 = sqrt( i*(i+1)*(i+2)**2 / (2*temp) )
+			da_xz += const * ( d9_1 * (E[i+2][2] * C[i][1] + F[i+2][2] * S[i][1]) + \
+							d10_1 * (-E[i+2][0] * C[i][1] - F[i+2][0] * S[i][1]) )		# j=1时, ax对Z的偏导
+			# j=0和j=1时, ay对Z的偏导, 也是az对Y的偏导	
+			da_yz += const * ( d8 * (F[i+2][1] * C[i][0]) )
+			da_yz += const * ( d9_1 * (F[i+2][1] * C[i][1] - E[i+2][2] * S[i][1]) + 
+							d10_1 * (F[i+2][0] * C[i][0] - E[i+2][0] * S[i][1]) )
+			for j in range(2, i):
+				d5 = sqrt( (i+j+1)*(i+j+2)*(i+j+3)*(i+j+4) * temp )
+				d6 = sqrt( (i-j+1)*(i-j+2)*(i+j+1)*(i+j+2) * temp )
+				d7 = sqrt( (i-j+1)*(i-j+2)*(i-j+3)*(i-j+4)*(i+j+1)*(i+j+2) * temp ) if j != 2 \
+						else sqrt( (i+3)*(i+4) / ((i+1)*(i+2)) * temp )
+				d9 = sqrt( (i-j+1)*(i+j+1)*(i+j+2)*(i+j+3) * temp/4 )
+				d10 = sqrt( (i-j+1)*(i-j+2)*(i-j+3)*(i-j+4)*(i+j+1) * temp / 4 )
+				da_xx += const/4 * ( d5 * (E[i+2][j+2] * C[i][j] + F[i+2][j+2] * S[i][j]) + \
+								   2*d6 * (-E[i+2][j] * C[i][j] - F[i+2][j] * S[i][j]) + \
+								   2*d7 * (E[i+2][j-2] * C[i][j] - F[i+2][j-2] * S[i][j]) )
+				da_xy += const/4 * ( d5 * (F[i+2][j+2] * C[i][j] - E[i+2][j+2] * S[i][j]) + \
+								   2*d7 * (-F[i+2][j-2] * C[i][j] + F[i+2][j-2] * S[i][j]) )
+				da_xz += const * ( d9 * (E[i+2][j+1] * C[i][j] + F[i+2][j+1] * S[i][j]) + \
+								d10 * (-E[i+2][j-1] * C[i][j] - F[i+2][j-1] * S[i][j]) )
+				da_yz += const * ( d9 * (F[i+2][j+1] * C[i][j] - E[i+2][j+1] * S[i][j]) + \
+								d10 * (F[i+2][j-1] * C[i][j] - E[i+2][j-1] * S[i][j]) )
+			da_zz = np.sum( np.array([ const * (sqrt( (i-j+1)*(i-j+2)*(i+j+1)*(i+j+2) * temp ) * \
+							(E[i+2][j] * C[i][j] + F[i+2][j] * S[i][j])) for j in range(0, i) ]) )
+		A = np.array([ [da_xx, da_xy, da_xz], [da_xy, 0, da_yz], [da_xz, da_yz, da_zz] ])
+		A = np.dot( np.dot(HL.T, A), HL )	# 变换到惯性系下
+		return A	# 3*3
+			
+
+	def partial_third(self, r_sat, time_utc):
+		'''计算第三体引力摄动加速度 对 位置 的偏导数矩阵, 王正涛(3-3-18), 对速度为0阵'''
+		m2e = self.moon2Earth(time_utc)
+		m2s = self.moon2Sun(time_utc)
+		l1, l2 = m2e - r_sat, m2s - r_sat
+		l1_norm, l2_norm = np.linalg.norm(l1, 2), np.linalg.norm(l2, 2)
+		global MIU_E, MIU_S
+		A = - ( MIU_E / l1_norm**3 * (np.identity(3) - 3/l1_norm**2 * np.outer(l1, l1)) + \
+				MIU_S / l2_norm**3 * (np.identity(3) - 3/l2_norm**2 * np.outer(l2, l2)) )
+		return A	# 3*3
+		
+	
+	def jacobian_single(self, r_sat, time_utc):
+		'''计算惯性系下，单颗卫星状态的Jacobian矩阵'''
+		partial = self.partial_nonspher(r_sat, time_utc) + self.partial_third(r_sat, time_utc) 	# partial 3*3
+		low = np.hstack( (partial, np.zeros((3,3))) )	# low 3*6
+		up = np.hstack( (np.zeros((3,3)), np.identity(3)) )	# up 3*6
+		J = np.vstack( (up, low) )
+		return np.array(J)
 		
 		
 		

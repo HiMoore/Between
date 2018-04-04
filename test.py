@@ -4,12 +4,10 @@ import numpy as np
 import pandas as pd
 from scipy.integrate import solve_ivp, odeint, ode
 from matplotlib import pyplot as plt
-import re
 from math import *
-from datetime import datetime
-from jplephem.spk import SPK
 from orbit import *
-from pprint import pprint
+from orbit_predictor.keplerian import rv2coe
+from orbit_predictor.angles import ta_to_M, M_to_ta
 import matlab.engine
 
 
@@ -20,10 +18,10 @@ class Test_Orbit(Orbit):
 		return
 
 	def singleDay_error(self):
-		number, t0 = 720, 0
-		rv_0 = [1837553.088459, -100877.893987, -0.369920, 59.176544, 1077.932044, 1425.301239]
-		HPOP = pd.read_csv("STK/Moon_HPOP.csv")[:number]	# 取前number个点进行试算
-		TwoBody = pd.read_csv("STK/Moon_TwoBody.csv")[:number]	# 取前number个点进行试算
+		number, t0 = 18, 0
+		rv_0 = np.array([1837.553088459, -100.877893987, -0.369920e-3, 59.176544e-3, 1.077932044, 1.425301239])
+		HPOP = pd.read_csv("STK/Moon_HPOP.csv", nrows=number)	# 取前number个点进行试算
+		TwoBody = pd.read_csv("STK/Moon_TwoBody.csv", nrows=number)	# 取前number个点进行试算
 		del HPOP["Time (UTCG)"]
 		del TwoBody["Time (UTCG)"]
 		HPOP = np.array(HPOP).T
@@ -58,6 +56,35 @@ class Test_Orbit(Orbit):
 		HL_array = np.array([ self.moon_Cbi(time_utc) for time_utc in utc_array ])
 		r_fixed = np.array([ np.dot(HL, r_sat) for HL, r_sat in zip(HL_array, r_array) ])
 		return (r_fixed, HL_array)
+		
+		
+	def rv2six_error(self):
+		data = pd.read_csv("STK/Moon_HPOP.csv", nrows=10)	# 取前number个点进行试算
+		del data["Time (UTCG)"]
+		data = data.values
+		geng = np.array([ self.rv2sixEle_Geng(rv, MIU=MIU_M) for rv in data ])
+		# zhang = np.array([ self.rv2sixEle_Zhang(rv, MIU=MIU_M) for rv in data ])
+		global MIU_M
+		sixEle = np.array([ kepler.rv2coe(MIU_M/1000**3, rv[:3]/1000, rv[3:]/1000) for rv in data ])
+		for Ele in sixEle:
+			Ele[0] *= 1000
+			Ele[5] = ta_to_M(Ele[5], Ele[1])
+		# print("geng-zhang: ", geng - zhang, '\n\n')
+		print("geng-sixEle: ", geng-sixEle, '\n\n')
+		# print("zhang-sixEle: ", zhang-sixEle, '\n\n')
+		
+		
+	def Acc_error(self):
+		accelerate = pd.read_csv("STK/Moon_Acceleration.csv")[:10]	# 取前number个点进行试算
+		del accelerate["Time (UTCG)"]
+		accelerate = accelerate.values
+		data = pd.read_csv("STK/Moon_HPOP.csv")[:10]	# 取前number个点进行试算
+		del data["Time (UTCG)"]
+		data = data.values
+		Ac = np.array([ self.complete_dynamic(RV/1000, miu=MIU_M, Re=RM, lm=30) for RV in data ])
+		print(Ac, "\n\n")
+		print(accelerate - Ac)
+		
 
 
 if __name__ == "__main__":
@@ -94,4 +121,4 @@ if __name__ == "__main__":
 	# plt.plot(vec_matg)
 	
 	# plt.show()
-	eng.quit()
+	# eng.quit()
