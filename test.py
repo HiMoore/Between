@@ -8,7 +8,6 @@ from math import *
 from orbit import *
 from orbit_predictor.keplerian import rv2coe
 from orbit_predictor.angles import ta_to_M, M_to_ta
-import matlab.engine
 
 
 
@@ -18,14 +17,15 @@ class Test_Orbit(Orbit):
 		return
 
 	def singleDay_error(self):
-		number, t0 = 18, 0
-		rv_0 = np.array([1837.553088459, -100.877893987, -0.369920e-3, 59.176544e-3, 1.077932044, 1.425301239])
-		HPOP = pd.read_csv("STK/Moon_HPOP.csv", nrows=number)	# 取前number个点进行试算
-		TwoBody = pd.read_csv("STK/Moon_TwoBody.csv", nrows=number)	# 取前number个点进行试算
-		del HPOP["Time (UTCG)"]
-		del TwoBody["Time (UTCG)"]
+		number, t0 = 720*30, 0
+		HPOP = pd.read_csv("STK/Moon_Inertial_HPOP.csv", nrows=number, usecols=range(1,7))	# 取前number个点进行试算
+		TwoBody = pd.read_csv("STK/Moon_Inertial_TwoBody.csv", nrows=number, usecols=range(1,7))	# 取前number个点进行试算
+		HPOP = pd.read_csv("STK/Moon_J2000_HPOP.csv", nrows=number, usecols=range(1,7))
+		TwoBody = pd.read_csv("STK/Moon_J2000_TwoBody.csv", nrows=number, usecols=range(1,7))
 		HPOP = np.array(HPOP).T
 		TwoBody = np.array(TwoBody).T
+		rv_0 = HPOP[:, 0]
+		print(rv_0)
 		orbit = self.integrate_orbit(rv_0, number)
 		delta_1 = HPOP - TwoBody
 		delta_2 = orbit - TwoBody
@@ -52,73 +52,47 @@ class Test_Orbit(Orbit):
 		plt.show()
 		
 		
-	def inertial2fixed(self, r_array, utc_array):
-		HL_array = np.array([ self.moon_Cbi(time_utc) for time_utc in utc_array ])
-		r_fixed = np.array([ np.dot(HL, r_sat) for HL, r_sat in zip(HL_array, r_array) ])
-		return (r_fixed, HL_array)
-		
-		
-	def rv2six_error(self):
-		data = pd.read_csv("STK/Moon_HPOP.csv", nrows=10)	# 取前number个点进行试算
+	def AccSTK_error(self):
+		number = 720
+		# accelerate = pd.read_csv("STK/Moon_Inertial_Acceleration_HPOP.csv", nrows=number)	# 取前number个点进行试算
+		# del accelerate["Time (UTCG)"]
+		# accelerate = accelerate.values * 1000
+		# np.save("a_stkInertial.npy", accelerate)
+		a_stkInertial = np.load("a_stkInertial.npy")
+		data = pd.read_csv("STK/Moon_Inertial_HPOP.csv", nrows=number)# 取前number个点进行试算
 		del data["Time (UTCG)"]
 		data = data.values
-		geng = np.array([ self.rv2sixEle_Geng(rv, MIU=MIU_M) for rv in data ])
-		# zhang = np.array([ self.rv2sixEle_Zhang(rv, MIU=MIU_M) for rv in data ])
-		global MIU_M
-		sixEle = np.array([ kepler.rv2coe(MIU_M/1000**3, rv[:3]/1000, rv[3:]/1000) for rv in data ])
-		for Ele in sixEle:
-			Ele[0] *= 1000
-			Ele[5] = ta_to_M(Ele[5], Ele[1])
-		# print("geng-zhang: ", geng - zhang, '\n\n')
-		print("geng-sixEle: ", geng-sixEle, '\n\n')
-		# print("zhang-sixEle: ", zhang-sixEle, '\n\n')
 		
 		
-	def Acc_error(self):
-		accelerate = pd.read_csv("STK/Moon_Acceleration.csv")[:10]	# 取前number个点进行试算
-		del accelerate["Time (UTCG)"]
-		accelerate = accelerate.values
-		data = pd.read_csv("STK/Moon_HPOP.csv")[:10]	# 取前number个点进行试算
+		print((accelerate - Ac[:, 3:]) / accelerate * 100)
+		
+		
+	def AccMatlab_error(self):
+		ob = Orbit()
+		number = 20
+		data = pd.read_csv("STK/Moon_Inertial_HPOP.csv", nrows=number)	# 取前number个点进行试算
 		del data["Time (UTCG)"]
-		data = data.values
-		Ac = np.array([ self.complete_dynamic(RV/1000, miu=MIU_M, Re=RM, lm=30) for RV in data ])
-		print(Ac, "\n\n")
-		print(accelerate - Ac)
+		RV_array = data.values
+		r_array = RV_array[:, :3]
+		utc_array = (ob.generate_time(start_t="20180101", end_t="20180331"))[:number]
+		utcJD_list = [ time_utc.to_julian_date() for time_utc in utc_array ]
+		tdbJD_list = [ time_utc.to_julian_date() + 69.184/86400 for time_utc in utc_array ]
+		I2F_list = [ ob.moon_Cbi(tdb_jd) for tdb_jd in tdbJD_list ]
+		rFixed_list = [ np.dot(I2F, r_sat) for (I2F, r_sat) in zip(I2F_list, r_array) ]
+		r_sat, RV, time_utc = r_array[0], RV_array[0], utc_array[0]
+		tdb_jd = time_utc.to_julian_date() + 69.184/86400
 		
+		lg = ob.legendre_spher_alfs(1, lm=6)
+		a1 = np.array([ ob.nonspherGravity(r_sat, tdb_jd) for (r_sat, tdb_jd) in zip(r_array, tdbJD_list) ])
+		a2 = np.array([ ob.nonspher_moon(r_sat, tdb_jd) for (r_sat, tdb_jd) in zip(r_array, tdbJD_list) ])
+		a3 = np.array([ ob.nonspher_moongravity(r_sat, tdb_jd) for (r_sat, tdb_jd) in zip(r_array, tdbJD_list) ])
+		# a_matlab = np.load("a_matlab.npy")
+		a_matlab = np.array([ ob.nonspher_matlab(r_sat, tdb_jd) for (r_sat, tdb_jd) in zip(r_array, tdbJD_list) ])
+		np.save("a_matlab.npy", a_matlab)
+
 
 
 if __name__ == "__main__":
 
 	test = Test_Orbit()
-	test.singleDay_error()
-	# eng = matlab.engine.start_matlab()
-	
-	
-	# number = 360
-	# data = pd.read_csv("STK/Moon_HPOP.csv")[:number]	# 取前number个点进行试算
-	# del data["Time (UTCG)"]
-	# r_array = data[['x (m)', 'y (m)', 'z (m)']].values
-	# utc_array = (test.generate_time(start_t="20180101", end_t="20180331"))[:number]
-	# r_fixed, HL_array = test.inertial2fixed(r_array, utc_array)
-	# mat_g = np.array([ np.dot( HL.T, np.array( eng.gravitysphericalharmonic( matlab.double(rf.tolist()), 'LP165P', 30.0, nargout=3 ) ) ) \
-					# for HL, rf in zip(HL_array, r_fixed) ])
-	# py_g = np.array([ test.centreGravity(r_sat)+test.nonspherGravity(r_sat, time_utc) \
-					# for r_sat, time_utc in zip(r_array, utc_array) ])
-	# py_gvec = np.array([ test.centreGravity(r_sat)+test.nonspher_Gvec(r_sat, time_utc) \
-					# for r_sat, time_utc in zip(r_array, utc_array) ])
-	# print(mat_g[:5])
-	# pyg_matg = py_g - mat_g
-	# pyg_vec = py_g - py_gvec
-	# vec_matg = py_gvec - mat_g
-	
-	# plt.figure(1)
-	# plt.plot(pyg_matg)
-	
-	# plt.figure(2)
-	# plt.plot(pyg_vec)
-	
-	# plt.figure(3)
-	# plt.plot(vec_matg)
-	
-	# plt.show()
-	# eng.quit()
+	test.AccMatlab_error()
