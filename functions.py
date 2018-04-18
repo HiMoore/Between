@@ -194,18 +194,6 @@ class Orbit:
 		'''功能：反正切'''
 		return 0 if (abs(y)<CSD_EPS and abs(x)<CSD_EPS) \
 				else atan2(y, x)
-				
-		
-	def readCoffients(self, number=496, n=30):
-		'''获取中心天体球谐引力系数，默认前30阶，包括0阶项, np.array'''
-		df = pd.read_csv("STK/LP165P.grv", sep="\t", header=None)
-		f = df[:number]
-		f.columns = ["l", "m", "Clm", "Slm"]
-		f = f.set_index([f["l"], f["m"]]); del f['l'], f['m']
-		Clm, Slm = f["Clm"], f["Slm"]
-		Clm = [ np.array(Clm.loc[i]) for i in range(0, n+1) ]
-		Slm = [ np.array(Slm.loc[i]) for i in range(0, n+1) ]
-		return [np.array(Clm), np.array(Slm)]	
 			
 		
 	def utc2JD(self, time_utc):
@@ -406,117 +394,46 @@ class Orbit:
 			dp_ij = [ sqrt((i-j)*(i+j+1)) * P[i][j+1] - j*tan(phi) * P[i][j] for j in range(1, i+1) ]
 			dp_i0.extend(dp_ij); deri_P.append(np.array(dp_i0))
 		return np.array(deri_P)
-
 		
-	def nonspherGravity_1(self, r_sat, time_jd, miu=MIU_M, Re=RM, lm=30):
-		'''计算中心天体的非球形引力加速度，single-time, 刘晓刚-GOCE卫星(公式2.3.6)'''
-		HL = self.moon_Cbi(time_jd)	# 月惯系到月固系的方向余弦矩阵 3*3
-		r_fixed = np.dot(HL, r_sat)		# 应该在固连系下建立，王正涛
-		r_norm = np.linalg.norm(r_fixed, 2)
-		phi, lamda = atan(r_fixed[2] / sqrt(r_fixed[0]**2+r_fixed[1]**2)), atan(r_fixed[1]/r_fixed[0])
-		spher2rect = np.array([ [cos(phi)*cos(lamda), cos(phi)*sin(lamda), sin(phi)], \
-					[(-1/r_norm)*sin(phi)*cos(lamda), (-1/r_norm)*sin(phi)*sin(lamda),  (1/r_norm)*cos(phi)], \
-					[(-1/r_norm)*sin(lamda)/cos(phi), (1/r_norm)*cos(lamda)/cos(phi), 0] ])	#球坐标到直角坐标 3*3
-		P = self.legendre_spher_col(phi, lm)	# 勒让德函数
-		dP = self.diff_legendre_spher(phi, P, lm)
-		Vr, Vphi, Vlamda, const = 0, 0, 0, Re/r_norm
-		for i in range(0, lm):
-			temp_r, temp = i+1, const**(i+2)
-			for j in range(0, i+1):
-				Vr += temp_r * temp * ( C[i][j]*cos(j*lamda) + S[i][j]*sin(j*lamda) ) * P[i][j]
-				Vphi += temp * ( C[i][j]*cos(j*lamda) + S[i][j]*sin(j*lamda) ) * dP[i][j] * r_norm
-				Vlamda += temp * j * ( -C[i][j]*sin(j*lamda) + S[i][j]*cos(j*lamda) ) * P[i][j] * r_norm
-		g1 = miu/Re**2 * np.array([-Vr, Vphi, Vlamda])
-		g1 = np.dot(g1, spher2rect)	 # 球坐标到直角坐标，乘积顺序不要反了
-		g1 = np.dot(HL.T, g1)	# 将月固系下加速度转换到月惯系下
-		return g1
-		
-		
-	def nonspherGravity_2(self, r_sat, time_utc, miu=MIU_M, Re=RM, l=30, m=30):
-		'''计算中心天体的非球形引力加速度，single-time, 钟波-基于GOCE卫星(公式2.2.4)
-		输入：惯性系下卫星位置矢量r_sat，均为np.array;	utc时间(datetime);	miu默认为月球;
-		输出：返回中心天体的引力加速度, np.array'''
-		HL = self.moon_Cbi(time_utc)	# 月惯系到月固系的方向余弦矩阵 3*3
-		r_fixed = np.dot(HL, r_sat)		# 应该在固连系下建立，王正涛
-		r_norm = np.linalg.norm(r_fixed, 2)
-		phi, lamda = atan(r_fixed[2] / sqrt(r_fixed[0]**2+r_fixed[1]**2)), atan(r_fixed[1]/r_fixed[0])
-		spher2rect = np.array([ [cos(phi)*cos(lamda), cos(phi)*sin(lamda), sin(phi)], \
-					[(-1/r_norm)*sin(phi)*cos(lamda), (-1/r_norm)*sin(phi)*sin(lamda),  (-1/r_norm)*cos(phi)], \
-					[(-1/r_norm)*sin(lamda)/cos(phi), (1/r_norm)*cos(lamda)/cos(phi), 0] ])	#球坐标到直角坐标 3*3
-		P = self.legendre_spher_col(phi, l, m)	# 勒让德函数包括0阶项
-		dP = self.diff_legendre_spher(phi, P, l, m)
-		C, S = self.readCoffients(number=495, n=l)	# 包括0阶项
-		Vr, Vphi, Vlamda, const = 0, 0, 0, Re/r_norm
-		for i in range(0, l):	# C, S, P均从0阶项开始
-			temp_r, temp = -(i+1)/r_norm, const**(i+1)
-			for j in range(0, i+1):
-				Vr += temp_r * temp * ( C[i][j]*cos(j*lamda) + S[i][j]*sin(j*lamda) ) * P[i][j]
-				Vphi += temp * ( C[i][j]*cos(j*lamda) + S[i][j]*sin(j*lamda) ) * dP[i][j] 	# check dP_lm!
-				Vlamda += temp * ( S[i][j]*cos(j*lamda) - C[i][j]*sin(j*lamda) ) * j * P[i][j] 
-		g1 = miu/Re * np.array([Vr, Vphi, Vlamda])	# 非球形引力 3*1
-		g1 = np.dot(g1, spher2rect)	 # 球坐标到直角坐标，乘积顺序不要反了
-		g1 = np.dot(HL.T, g1)	# 将月固系下加速度转换到月惯系下
-		return g1
-
 		
 	def nonspher_moongravity(self, r_sat, tdb_jd, miu=MIU_M, Re=RM, lm=CSD_LM):
 		'''计算月球的非球形引力加速度，迭代版本, Brandon A. Jones - Efficient Models for the Evaluation and Estimation(eq. 2.14)'''
-		I2F = self.moon_Cbi(tdb_jd)	# 月惯系到月固系的方向余弦矩阵 3*3
-		r_fixed = np.dot(I2F, r_sat)		# 应该在固连系下建立，王正涛
+		I2F = self.moon_Cbi(tdb_jd)
+		r_fixed = np.dot(I2F, r_sat)
 		r_norm = np.linalg.norm(r_fixed, 2)
-		phi = asin(r_fixed[2] / r_norm)			# Keric A. Hill-Autonomous Navigation in Libration Point Orbits
-		lamda = atan(r_fixed[1]/r_fixed[0])		# eq. 8.2 and matlab code
-		P = self.legendre_spher_alfs(phi, lm)	# 勒让德函数
-		# 球坐标对直角坐标的偏导数, Keric A. Hill(eq. 8.10), Brandon A. Jones(eq. 2.13)
-		xy_norm = 1/np.linalg.norm(r_fixed[:2])
+		xy_norm = 1/np.linalg.norm(r_fixed[:2], 2)
+		phic, lamda = asin(r_fixed[2]/r_norm), atan2(r_fixed[1], r_fixed[0])
+		P = self.legendre_spher_alfs(phic, lm)	# 至此，cos_m, sin_m, P, pi_dot均与Matlab一致
 		dR_dr = r_fixed / r_norm
 		dphi_dr = xy_norm * np.array([ -r_fixed[0]*r_fixed[2] / pow(r_norm, 2), -r_fixed[1]*r_fixed[2] / pow(r_norm, 2), \
 									1 - pow(r_fixed[2], 2) / pow(r_norm, 2) ])
 		dlamda_dr = pow(xy_norm, 2) * np.array([ -r_fixed[1], r_fixed[0], 0 ])
 		dU_dr, dU_dphi, dU_dlamda = 0, 0, 0
+		rRatio = Re / r_norm
+		cos_m, sin_m = np.zeros(lm+2), np.zeros(lm+2)
+		cos_m[0], cos_m[1], sin_m[0], sin_m[1] = 1, cos(lamda), 0, sin(lamda)
+		for m in range(2, lm+2):
+			cos_m[m] = 2*cos_m[1] * cos_m[m-1] - cos_m[m-2]
+			sin_m[m] = 2*cos_m[1] * sin_m[m-1] - sin_m[m-2]
 		for i in range(2, lm+1):
-			const, const_r = pow(Re/r_norm, i), pow(Re/r_norm, i) * (i+1)
+			rRatio_n = pow(rRatio, i)
 			for j in range(i+1):
-				dU_dr += const_r * P[i][j] * (C[i][j] * cos(j*lamda) + S[i][j] * sin(j*lamda))
-				dU_dphi += const * (P[i][j+1] * pi_dot[i][j] - j*tan(phi) * P[i][j]) * (C[i][j]*cos(j*lamda) + S[i][j]*sin(j*lamda))
-				dU_dlamda += const*j * P[i][j] * (S[i][j]*cos(j*lamda) - C[i][j]*sin(j*lamda))
+				dU_dr +=  P[i][j] * ( C[i][j] * cos_m[j] + S[i][j] * sin_m[j] ) * rRatio_n * (i+1)
+				dU_dphi +=  ( P[i][j+1] * pi_dot[i][j] - j * r_fixed[2]*xy_norm * P[i][j] ) * \
+							( C[i][j]*cos_m[j] + S[i][j]*sin_m[j] )* rRatio_n
+				dU_dlamda += j * P[i][j] * ( S[i][j]*cos_m[j] - C[i][j]*sin_m[j] )* rRatio_n
 		dU_dr, dU_dphi, dU_dlamda = -miu/r_norm**2*dU_dr, miu/r_norm*dU_dphi, miu/r_norm*dU_dlamda	# 非球形引力 3*1
 		a_fixed = dR_dr * dU_dr + dphi_dr * dU_dphi + dlamda_dr * dU_dlamda
-		a_inertial = a_fixed * 1000  # np.dot(I2F.T, a_fixed)
+		a_inertial = np.dot(I2F.T, a_fixed)
 		return a_inertial	# km/s^2
 		
 		
-	def nonspher_formatlab(self, r_sat, tdb_jd, miu=MIU_M, Re=RM, lm=CSD_LM):
-		'''计算月球的非球形引力加速度，迭代版本, Brandon A. Jones - Efficient Models for the Evaluation and Estimation(eq. 2.14)'''
-		I2F = self.moon_Cbi(tdb_jd)
-		r_fixed = np.dot(I2F, r_sat)
-		r_norm = np.linalg.norm(r_fixed, 2)
-		phic, lamda = asin(r_fixed[2]/r_norm), atan(r_fixed[1]/r_fixed[0])
-		cos_m = np.array([ cos(m*lamda) for m in range(lm+2) ])
-		sin_m = np.array([ sin(m*lamda) for m in range(lm+2) ])
-		P = self.legendre_spher_alfs(phic, lm)	# 至此，cos_m, sin_m, P, pi_dot均与Matlab一致
-		xy_norm = 1/np.linalg.norm(r_fixed[:2])
-		dR_dr = r_fixed / r_norm
-		dphi_dr = xy_norm * np.array([ -r_fixed[0]*r_fixed[2] / pow(r_norm, 2), -r_fixed[1]*r_fixed[2] / pow(r_norm, 2), \
-									1 - pow(r_fixed[2], 2) / pow(r_norm, 2) ])
-		dlamda_dr = pow(xy_norm, 2) * np.array([ -r_fixed[1], r_fixed[0], 0 ])
-		dU_dr_N, dU_dphi_N, dU_dlamda_N = 1, 0, 0
-		rRatio = Re / r_norm
-		for n in range(2, lm+1):
-			rRatio_n = pow(rRatio, n)
-			sum_r, sum_phi, sum_lamda = 0, 0, 0
-			for m in range(0, n+1):
-				sum_r += P[n][m] * ( C[n][m]*cos_m[m] + S[n][m]*sin_m[m] )
-				sum_phi += ( P[n][m+1] * pi_dot[n][m] - r_fixed[2]/np.linalg.norm(r_fixed[:2], 2) * m * P[i][j])\
-							* ( C[n][m]*cos_m[m] + S[n][m]*sin_m[m] )
-				sum_lamda += m * P[n][m] * ( S[n][m]*cos_m[m] - C[n][m]*sin_m[m] )
-			dU_dr_N += sum_r * rRatio_n * (n+1)
-			dU_dphi_N += sum_phi * rRatio_n
-			dU_dlamda_N += sum_lamda * rRatio_n
-		dU_dr, dU_dphi, dU_dlamda = -miu/r_norm**2*dU_dr_N, miu/r_norm*dU_dphi_N, miu/r_norm*dU_dlamda_N	# 非球形引力 3*1
-		a_fixed = dR_dr * dU_dr + dphi_dr * dU_dphi + dlamda_dr * dU_dlamda
-		a_inertial = (a_fixed - self.centreGravity(r_fixed)) * 1000  # np.dot(I2F.T, a_fixed)
-		return a_inertial	# km/s^2
+	def nonspher_matlab(self, r_sat, tdb_jd, miu=MIU_M, Re=RM, lm=CSD_LM):
+		I2F = self.moon_Cbi(tdb_jd)	# 月惯系到月固系的方向余弦矩阵 3*3
+		r_fixed = np.dot(I2F, r_sat) * 1000	# 转化单位 km 为 m 
+		a_fixed = np.array( eng.gravitysphericalharmonic( matlab.double(r_fixed.tolist()), 'LP165P', 30.0, nargout=3 ) )	# m/s^2
+		a_fixed = a_fixed - (self.centreGravity(r_fixed/1000)) * 1000  # np.dot(I2F.T, a_fixed) / 1000		# m/s^2
+		return a_fixed	# m/s^2
 		
 		
 	def jacobian_nonspher_1(self, r_sat, time_utc, miu=MIU_M, Re=RM, lm=30):
