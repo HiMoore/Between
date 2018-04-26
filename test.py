@@ -17,18 +17,17 @@ class Test_Orbit(Orbit):
 		return
 
 	def singleDay_error(self):
-		number, t0 = 720*30, 0
-		HPOP = pd.read_csv("STK/Moon_Inertial_HPOP.csv", nrows=number, usecols=range(1,7))	# 取前number个点进行试算
-		TwoBody = pd.read_csv("STK/Moon_Inertial_TwoBody.csv", nrows=number, usecols=range(1,7))	# 取前number个点进行试算
-		HPOP = pd.read_csv("STK/Moon_J2000_HPOP.csv", nrows=number, usecols=range(1,7))
-		TwoBody = pd.read_csv("STK/Moon_J2000_TwoBody.csv", nrows=number, usecols=range(1,7))
+		number, t0 = 720, 0
+		# HPOP = pd.read_csv("STK/Inertial_HPOP_30d.csv", nrows=number, usecols=range(1,7))	# 取前number个点进行试算
+		HPOP = pd.read_csv("STK/30degree_HPOP_30d.csv", nrows=number, usecols=range(1,7))	# 取前number个点进行试算
+		TwoBody = pd.read_csv("STK/Inertial_TwoBody_30d.csv", nrows=number, usecols=range(1,7))	# 取前number个点进行试算
 		HPOP = np.array(HPOP).T
 		TwoBody = np.array(TwoBody).T
 		rv_0 = HPOP[:, 0]
 		print(rv_0)
 		orbit = self.integrate_orbit(rv_0, number)
 		delta_1 = HPOP - TwoBody
-		delta_2 = orbit - TwoBody
+		delta_2 = (orbit - TwoBody)
 		delta_3 = HPOP - orbit
 		
 		plt.figure(1)
@@ -52,25 +51,10 @@ class Test_Orbit(Orbit):
 		plt.show()
 		
 		
-	def AccSTK_error(self):
-		number = 720
-		# accelerate = pd.read_csv("STK/Moon_Inertial_Acceleration_HPOP.csv", nrows=number)	# 取前number个点进行试算
-		# del accelerate["Time (UTCG)"]
-		# accelerate = accelerate.values * 1000
-		# np.save("a_stkInertial.npy", accelerate)
-		a_stkInertial = np.load("a_stkInertial.npy")
-		data = pd.read_csv("STK/Moon_Inertial_HPOP.csv", nrows=number)# 取前number个点进行试算
-		del data["Time (UTCG)"]
-		data = data.values
-		
-		
-		print((accelerate - Ac[:, 3:]) / accelerate * 100)
-		
-		
 	def AccMatlab_error(self):
 		ob = Orbit()
 		number = 20
-		data = pd.read_csv("STK/Moon_Inertial_HPOP.csv", nrows=number)	# 取前number个点进行试算
+		data = pd.read_csv("STK/Inertial HPOP_30d.csv", nrows=number)	# 取前number个点进行试算
 		del data["Time (UTCG)"]
 		RV_array = data.values
 		r_array = RV_array[:, :3]
@@ -95,4 +79,4 @@ class Test_Orbit(Orbit):
 if __name__ == "__main__":
 
 	test = Test_Orbit()
-	test.AccMatlab_error()
+	test.singleDay_error()

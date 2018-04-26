@@ -8,6 +8,8 @@ from math import *
 from datetime import datetime
 from jplephem.spk import SPK
 from pprint import pprint
+from orbit_predictor.keplerian import rv2coe
+from orbit_predictor.angles import ta_to_M, M_to_ta
 
 
 MIU_E, MIU_M, MIU_S = 3.986004415e+14, 4.902801056e+12, 1.327122e+20	#引力系数
@@ -394,6 +396,33 @@ class Orbit:
 			dp_ij = [ sqrt((i-j)*(i+j+1)) * P[i][j+1] - j*tan(phi) * P[i][j] for j in range(1, i+1) ]
 			dp_i0.extend(dp_ij); deri_P.append(np.array(dp_i0))
 		return np.array(deri_P)
+		
+
+	def nonspherGravity(self, r_sat, tdb_jd, miu=MIU_M, Re=RM, lm=CSD_LM):
+		'''计算中心天体的非球形引力加速度，single-time, 输入 km, 输出 m/s^2, 王正涛-卫星跟踪卫星测量(公式2-4-7)
+		输入：惯性系下卫星位置矢量r_sat，均为np.array, 单位 km;	tdb的儒略时间, float;	miu默认为月球;
+		输出：返回中心天体的引力加速度, np.array，单位 km/s^2'''
+		I2F = self.moon_Cbi(tdb_jd)	# 月惯系到月固系的方向余弦矩阵 3*3
+		r_fixed = np.dot(I2F, r_sat)		# 应该在固连系下建立，王正涛
+		r_norm = np.linalg.norm(r_fixed, 2)
+		xy_norm = 1/np.linalg.norm(r_fixed[:2], 2)
+		phi, lamda = atan2(r_fixed[2], 1/xy_norm), atan2(r_fixed[1], r_fixed[0])
+		spher2rect = np.array([ [cos(phi)*cos(lamda), cos(phi)*sin(lamda), sin(phi)], \
+					[(-1/r_norm)*sin(phi)*cos(lamda), (-1/r_norm)*sin(phi)*sin(lamda),  (1/r_norm)*cos(phi)], \
+					[(-1/r_norm)*sin(lamda)/cos(phi), (1/r_norm)*cos(lamda)/cos(phi), 0] ])	#球坐标到直角坐标 3*3
+		P = self.legendre_spher_alfs(phi, lm)	# 勒让德函数
+		Vr, Vphi, Vlamda, const = 0, 0, 0, Re/r_norm
+		for i in range(2, lm+1):	# 王正涛i从2开始
+			temp_r, temp = (i+1)*pow(const, i), pow(const, i)
+			for j in range(0, i+1):
+				Vr += ( C[i][j]*cos(j*lamda) + S[i][j]*sin(j*lamda) ) * P[i][j] * temp_r
+				Vphi += ( C[i][j]*cos(j*lamda) + S[i][j]*sin(j*lamda) ) * \
+						( pi_dot[i][j] * P[i][j+1] - j * r_fixed[2]*xy_norm * P[i][j] ) * temp 	# check dP_lm!
+				Vlamda += ( -C[i][j]*sin(j*lamda) + S[i][j]*cos(j*lamda) ) * P[i][j] * temp * j
+		g1 = np.array([-miu/r_norm**2*Vr, miu/r_norm*Vphi, miu/r_norm*Vlamda])	# 非球形引力 3*1
+		g1 = np.dot(g1, spher2rect)	 # 球坐标到直角坐标，乘积顺序不要反了
+		g1 = np.dot(I2F.T, g1)	# 将月固系下加速度转换到月惯系下
+		return g1	# km/s^2
 		
 		
 	def nonspher_moongravity(self, r_sat, tdb_jd, miu=MIU_M, Re=RM, lm=CSD_LM):
