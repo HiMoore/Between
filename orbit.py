@@ -259,9 +259,8 @@ class Orbit:
 		输入: 月心惯性系下的位置矢量; 	动力学时对应的儒略时间'''
 		I2F = self.moon_Cbi(tdb_jd)	# 月惯系到月固系的方向余弦矩阵 3*3
 		r_fixed = np.dot(I2F, r_sat)		# 应该在固连系下建立，王正涛
-		x, y, z = r_fixed
-		r_norm = np.linalg.norm(r_fixed, 2)
-		xy_norm = np.linalg.norm(r_fixed[:2], 2)
+		x, y, z, r_norm = r_fixed[0], r_fixed[1], r_fixed[2], np.linalg.norm(r_fixed, 2)
+		xy_norm, pow_r2, pow_r3 = np.linalg.norm(r_fixed[:2], 2), pow(r_norm, 2), pow(r_norm, 3)
 		phi, lamda = asin(z / r_norm), atan2(y, x)	# Keric A. Hill-Autonomous Navigation in Libration Point Orbits
 		cos_phi, tan_phi = xy_norm / r_norm, z / xy_norm
 		P = self.legendre_spher_alfs(phi, lm)	# 勒让德函数
@@ -269,35 +268,31 @@ class Orbit:
 		rRatio, lm_range = Re/r_norm, range(2, lm+1)
 		cos_m = np.array([ cos(j*lamda) for j in range(0, lm+1) ])
 		sin_m = np.array([ sin(j*lamda) for j in range(0, lm+1) ])
-		# 计算a对r(vector)的偏导需要用到 球坐标对直角坐标的偏导数(坐标变换), 以及 U对r(vector) 的一阶偏导数
-		dR_dr = r_fixed / r_norm
-		dphi_dr = 1/xy_norm * np.array([ -r_fixed[0]*r_fixed[2] / pow(r_norm, 2), -r_fixed[1]*r_fixed[2] / pow(r_norm, 2), \
-									1 - pow(r_fixed[2], 2) / pow(r_norm, 2) ])
-		dlamda_dr = 1/pow(xy_norm, 2) * np.array([ -r_fixed[1], r_fixed[0], 0 ])
-		dU_dR = -miu/pow(r_norm, 2) * ( sum([ pow(rRatio, i)*(i+1) * np.dot(P[i][:-1], C[i]*cos_m[:i+1] + S[i]*sin_m[:i+1]) for i in lm_range ]) )
+		# 计算a对r(vector)的偏导需要用到 球坐标对直角坐标的偏导数(坐标变换), 应为(1*3)矩阵
+		dR_dr = np.array([ r_fixed / r_norm ]) 	# (1*3)
+		dphi_dr = 1/xy_norm * np.array([ [-x*z / pow_r2, -y*z/pow_r2, 1 - pow(z,2)/pow_r2] ])		# (1*3)
+		dlamda_dr = 1/pow(xy_norm, 2) * np.array([ [-y, x, 0] ])	# (1*3)
+		# U对r(vector) 的一阶偏导数, 均为 const
+		dU_dR = -miu/pow_r2 * ( sum([ pow(rRatio, i)*(i+1) * np.dot(P[i][:-1], C[i]*cos_m[:i+1] + S[i]*sin_m[:i+1]) for i in lm_range ]) )
 		dU_dphi = miu/r_norm * sum([ pow(rRatio, i) * np.dot(P[i][1:] * pi_dot[i] -  tan_phi*M_Array[:i+1] * P[i][:-1], \
 							C[i]*cos_m[:i+1] + S[i]*sin_m[:i+1]) for i in lm_range ])
 		dU_dlamda = miu/r_norm * sum( [ pow(rRatio, i) * np.dot(M_Array[:i+1]*P[i][:-1], S[i]*cos_m[:i+1] - C[i]*sin_m[:i+1]) for i in lm_range ] )
-		# U对R(scalar), phi, lamda 的二阶偏导数计算, Hill与王庆宾一致
-		dR_2 = miu/pow(r_norm, 3) * sum([ pow(rRatio, i)*(i+2)*(i+1) * np.dot(P[i][:-1], C[i]*cos_m[:i+1] + S[i]*sin_m[:i+1]) \
-					for i in lm_range ])
-		dR_dphi = -miu/pow(r_norm, 2) * sum([ pow(rRatio, i)*(i+1) * np.dot(dP[i], C[i]*cos_m[:i+1] + S[i]*sin_m[:i+1]) \
-					for i in lm_range ])
-		dR_dlamda = -miu/pow(r_norm, 2) * sum([ pow(rRatio, i)*(i+1) * np.dot(M_Array[:i+1]*P[i][:-1], \
+		# U对R(scalar), phi, lamda 的二阶偏导数计算, Hill与王庆宾一致, 均为 const
+		dR_2 = miu/pow_r3 * sum([ pow(rRatio, i)*(i+2)*(i+1) * np.dot(P[i][:-1], C[i]*cos_m[:i+1] + S[i]*sin_m[:i+1]) for i in lm_range ])
+		dR_dphi = -miu/pow_r2 * sum([ pow(rRatio, i)*(i+1) * np.dot(dP[i], C[i]*cos_m[:i+1] + S[i]*sin_m[:i+1]) for i in lm_range ])
+		dR_dlamda = -miu/pow_r2 * sum([ pow(rRatio, i)*(i+1) * np.dot(M_Array[:i+1]*P[i][:-1], \
 					S[i]*cos_m[:i+1] - C[i]*sin_m[:i+1]) for i in lm_range ])
 		dphi_2 = miu/r_norm * sum([ pow(rRatio, i) * np.dot( (np.power(M_Array[:i+1]/cos_phi, 2) - i*(i+1)) * P[i][:-1] \
 					+ tan_phi * dP[i], C[i]*cos_m[:i+1] + S[i]*sin_m[:i+1]) for i in lm_range ])
-		dphi_dlamda = miu/r_norm * sum([ pow(rRatio, i) * np.dot(M_Array[:i+1]*dP[i], S[i]*cos_m[:i+1] - C[i]*sin_m[:i+1]) \
-					for i in lm_range ])
+		dphi_dlamda = miu/r_norm * sum([ pow(rRatio, i) * np.dot(M_Array[:i+1]*dP[i], S[i]*cos_m[:i+1] - C[i]*sin_m[:i+1]) for i in lm_range ])
 		dlamda_2 = -miu/r_norm * sum([ pow(rRatio, i) * np.dot( np.power(M_Array[:i+1], 2) * P[i][:-1], \
 					C[i]*cos_m[:i+1] + S[i]*sin_m[:i+1]) for i in lm_range ])
 		# U先对r(vector), 再对R(scalar), phi, lamda的二阶偏导数		
-		dr_dr = np.array([ dR_dr, dphi_dr, dlamda_dr])	# 3*3 Matrix
-		dr_dR = np.dot( np.array([ dR_2, dR_dphi, dR_dlamda ]), dr_dr )
-		dr_dphi = np.dot( np.array([dR_dphi, dphi_2, dphi_dlamda]), dr_dr )
-		dr_dlamda = np.dot( np.array([dR_dlamda, dphi_dlamda, dlamda_2]), dr_dr )
+		dr_dr = np.array([ dR_dr[0], dphi_dr[0], dlamda_dr[0] ])	# 3*3 Matrix
+		dr_dR = np.dot( np.array([ [dR_2, dR_dphi, dR_dlamda] ]), dr_dr )	# (1*3) * (3*3)
+		dr_dphi = np.dot( np.array([ [dR_dphi, dphi_2, dphi_dlamda] ]), dr_dr )	# (1*3) * (3*3)
+		dr_dlamda = np.dot( np.array([ [dR_dlamda, dphi_dlamda, dlamda_2] ]), dr_dr )	# (1*3) * (3*3)
 		# 后三项的计算, 包括R(scalar), phi, lamda对r(vector)的二阶偏导数
-		pow_r2, pow_r3 = pow(r_norm, 2), pow(r_norm, 3)
 		d2R_dr2 = np.array([ [ 1/r_norm - pow(x,2)/pow_r3,		-x*y/pow_r3,					-x*z/pow_r3 ],
 							 [ -y*x/pow_r3,						1/r_norm - pow(y,2)/pow_r3, 	- y*z/pow_r3 ],
 							 [ -z*x/pow_r3,  					-z*y/pow_r3,  					1/r_norm - pow(z,2)/pow_r3] ]) 
@@ -311,17 +306,23 @@ class Orbit:
 		d2lamda_dr2 = 1/pow(xy_norm, 4) * np.array([ [ 2*x*y,				pow(y,2)-pow(x,2), 	0 ],
 													 [ pow(y,2)-pow(x,2), 	-2*x*y, 			0 ],
 													 [ 0, 					0, 					0 ] ])
-		da_dr = dR_dr * dr_dR + dphi_dr * dr_dphi + dlamda_dr * dr_dlamda  +  d2R_dr2 * dU_dR + d2phi_dr2 * dU_dphi + d2lamda_dr2 * dU_dlamda
+		# 3 * [ (3*1) * (1*3) ] + 3 * [ (3*3) * const]
+		da_dr = np.dot(dR_dr.T, dr_dR) + np.dot(dphi_dr.T, dr_dphi) + np.dot(dlamda_dr.T, dr_dlamda) \
+				+ d2R_dr2 * dU_dR + d2phi_dr2 * dU_dphi + d2lamda_dr2 * dU_dlamda
 		da_dr = np.dot( np.dot(I2F.T, da_dr) ,  I2F ) 	# Hill(eq 8.28) and 苏勇-利用GOCE和GRACE卫星(eq 2-67)
 		return da_dr
 		
 		
 	def partial_nonspher_wang(self, r_sat, tdb_jd, miu=MIU_M, Re=RM, lm=CSD_LM):
+		'''非球形引力摄动加速度 对 (x, y, z) 的偏导数, 在月心惯性系下的表达(转换已完成), Keric A. Hill(eq. 8.14)
+		输入: 月心惯性系下的位置矢量; 	动力学时对应的儒略时间'''
 		I2F = self.moon_Cbi(tdb_jd)	# 月惯系到月固系的方向余弦矩阵 3*3
 		r_fixed = np.dot(I2F, r_sat)		# 应该在固连系下建立，王正涛
+		x, y, z = r_fixed
 		r_norm = np.linalg.norm(r_fixed, 2)
-		xy_norm = np.linalg.norm(r_fixed[:2], 2)
-		phi, lamda = atan2(r_fixed[2], xy_norm), atan2(r_fixed[1], r_fixed[0])
+		xy_norm, pow_r2, pow_r3 = np.linalg.norm(r_fixed[:2], 2), pow(r_norm, 2), pow(r_norm, 3)
+		phi, lamda = asin(z / r_norm), atan2(y, x)	# Keric A. Hill-Autonomous Navigation in Libration Point Orbits
+		cos_phi, tan_phi = xy_norm / r_norm, z / xy_norm
 		P = self.legendre_spher_alfs(phi, lm)	# 勒让德函数
 		dP = self.legendre_diff(phi, P, lm)
 		rRatio, lm_range = Re/r_norm, range(2, lm+1)
@@ -340,13 +341,12 @@ class Orbit:
 								[sin(phi)*sin(lamda)/r_norm, 		-sin(phi)*cos(lamda)/r_norm, 	0],
 								[-cos(lamda)/(r_norm*cos(phi)),		-sin(lamda)/(r_norm*cos(phi)), 	0] ])
 		# 计算a对r(vector)的偏导需要用到 U对r(vector) 的一阶偏导数
-		dU_dR = -miu/pow(r_norm, 2) * ( sum([ pow(rRatio, i)*(i+1) * np.dot(P[i][:-1], C[i]*cos_m[:i+1] + S[i]*sin_m[:i+1]) for i in lm_range ]) )
+		dU_dR = -miu/pow_r2 * ( sum([ pow(rRatio, i)*(i+1) * np.dot(P[i][:-1], C[i]*cos_m[:i+1] + S[i]*sin_m[:i+1]) for i in lm_range ]) )
 		dU_dphi = miu/r_norm * sum([ pow(rRatio, i) * np.dot(P[i][1:] * pi_dot[i] -  tan_phi*M_Array[:i+1] * P[i][:-1], \
 							C[i]*cos_m[:i+1] + S[i]*sin_m[:i+1]) for i in lm_range ])
 		dU_dlamda = miu/r_norm * sum( [ pow(rRatio, i) * np.dot(M_Array[:i+1]*P[i][:-1], S[i]*cos_m[:i+1] - C[i]*sin_m[:i+1]) for i in lm_range ] )
 		# U对R(scalar), phi, lamda 的二阶偏导数计算, Hill与王庆宾一致
-		dR_2 = miu/pow(r_norm, 3) * sum([ pow(rRatio, i)*(i+2)*(i+1) * np.dot(P[i][:-1], C[i]*cos_m[:i+1] + S[i]*sin_m[:i+1]) \
-					for i in lm_range ])
+		dR_2 = miu/pow_r3 * sum([ pow(rRatio, i)*(i+2)*(i+1) * np.dot(P[i][:-1], C[i]*cos_m[:i+1] + S[i]*sin_m[:i+1]) for i in lm_range ])
 		dR_dphi = -miu/pow(r_norm, 2) * sum([ pow(rRatio, i)*(i+1) * np.dot(dP[i], C[i]*cos_m[:i+1] + S[i]*sin_m[:i+1]) \
 					for i in lm_range ])
 		dR_dlamda = -miu/pow(r_norm, 2) * sum([ pow(rRatio, i)*(i+1) * np.dot(M_Array[:i+1]*P[i][:-1], \
@@ -399,10 +399,10 @@ if __name__ == "__main__":
 	tdbJD_list = [ time_utc.to_julian_date() + 69.184/86400 for time_utc in utc_array ]
 	I2F_list = [ ob.moon_Cbi(tdb_jd) for tdb_jd in tdbJD_list ]
 	rFixed_list = [ np.dot(I2F, r_sat) for (I2F, r_sat) in zip(I2F_list, r_array) ]
-	r_sat, r_fixed, RV, time_utc = r_array[10], rFixed_list[10], RV_array[10], utc_array[10]
+	r_sat, r_fixed, RV, time_utc = r_array[0], rFixed_list[0], RV_array[0], utc_array[0]
 	utc_jd, tdb_jd = time_utc.to_julian_date(), time_utc.to_julian_date() + 69.184/86400
 	# da_dr = [ ob.partial_centre(r_sat) for r_sat in r_array ]
 	nonsper_1 = [ ob.partial_nonspher(r_sat, tdb_jd) for (r_sat, tdb_jd) in zip(r_array, tdbJD_list) ]
 	nonsper_2 = [ ob.partial_nonspher_wang(r_sat, tdb_jd) for (r_sat, tdb_jd) in zip(r_array, tdbJD_list) ]
 	third = [ ob.partial_third(r_sat, tdb_jd) for (r_sat, tdb_jd) in zip(r_array, tdbJD_list) ]
-
+	print(nonsper_1[:5], "\n\n", nonsper_2[:5])
