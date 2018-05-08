@@ -19,8 +19,8 @@ class Test_Orbit(Orbit):
 	def singleDay_error(self):
 		number, t0 = 720, 0
 		# HPOP = pd.read_csv("STK/Inertial_HPOP_30d.csv", nrows=number, usecols=range(1,7))	# 取前number个点进行试算
-		HPOP = pd.read_csv("STK/30degree_HPOP_30d.csv", nrows=number, usecols=range(1,7))	# 取前number个点进行试算
-		TwoBody = pd.read_csv("STK/Inertial_TwoBody_30d.csv", nrows=number, usecols=range(1,7))	# 取前number个点进行试算
+		HPOP = pd.read_csv("STK/Inertial_HPOP_660.csv", nrows=number, usecols=range(1,7))	# 取前number个点进行试算
+		TwoBody = pd.read_csv("STK/Inertial_TwoBody_30d.csv", nrows=number, usecols=range(1,7))		# 取前number个点进行试算
 		HPOP = np.array(HPOP).T
 		TwoBody = np.array(TwoBody).T
 		rv_0 = HPOP[:, 0]

@@ -457,14 +457,6 @@ class Orbit:
 		return a_inertial	# km/s^2
 		
 		
-	def nonspher_matlab(self, r_sat, tdb_jd, miu=MIU_M, Re=RM, lm=CSD_LM):
-		I2F = self.moon_Cbi(tdb_jd)	# 月惯系到月固系的方向余弦矩阵 3*3
-		r_fixed = np.dot(I2F, r_sat) * 1000	# 转化单位 km 为 m 
-		a_fixed = np.array( eng.gravitysphericalharmonic( matlab.double(r_fixed.tolist()), 'LP165P', 30.0, nargout=3 ) )	# m/s^2
-		a_fixed = a_fixed - (self.centreGravity(r_fixed/1000)) * 1000  # np.dot(I2F.T, a_fixed) / 1000		# m/s^2
-		return a_fixed	# m/s^2
-		
-		
 	def partial_nonspher_wang(self, r_sat, tdb_jd, miu=MIU_M, Re=RM, lm=CSD_LM):
 		'''非球形引力摄动加速度 对 (x, y, z) 的偏导数, 在月心惯性系下的表达(转换已完成), Keric A. Hill(eq. 8.14)
 		输入: 月心惯性系下的位置矢量; 	动力学时对应的儒略时间'''
@@ -578,6 +570,33 @@ class Orbit:
 		
 		
 		plt.show()
+			
+		
+	def partial_centre_2(self, r_sat, miu=MIU_M):
+		'''中心引力加速度对 (x, y, z) 的偏导数在月惯系下的表达, 单位 1/s^2'''
+		r_norm = np.linalg.norm(r_sat, 2)
+		x, y, z, pow_r2 = r_sat[0], r_sat[1], r_sat[2], pow(r_norm, 2)
+		da_dr = miu/pow(r_norm, 3) * np.array([ [3*pow(x,2)/pow_r2 - 1, 	3*x*y/pow_r2, 			3*x*z/pow_r2], 
+										 [3*x*y/pow_r2, 			3*pow(y,2)/pow_r2 - 1, 	3*y*z/pow_r2], 
+										 [3*x*z/pow_r2, 			3*y*z/pow_r2, 			3*pow(z,2)/pow_r2 - 1] ])
+		return da_dr
+	
+		
+	def partial_third_2(self, r_sat, time_tdb):
+		'''第三天体引力摄动加速度对 (x, y, z) 的偏导数在月惯系下的表达, 单位 1/s^2'''
+		earth = self.moon2Earth(time_tdb)	# moon -> earth
+		sun = self.moon2Sun(time_tdb)	# moon -> sun
+		l_earth, l_sun = r_sat-earth, r_sat-sun
+		norm_earth, norm_sun = np.linalg.norm(l_earth, 2), np.linalg.norm(l_sun, 2)
+		pow_e2, pow_s2 = pow(norm_earth, 2), pow(norm_sun, 2)
+		xe, ye, ze = l_earth; xs, ys, zs = l_sun
+		earth_dadr = MIU_E/pow(norm_earth, 3) * np.array([ [3*pow(xe,2)/pow_e2 - 1, 	3*xe*ye/pow_e2, 	3*xe*ze/pow_e2],
+														[3*xe*ye/pow_e2, 		3*pow(ye,2)/pow_e2 - 1, 	3*ye*ze/pow_e2],
+														[3*xe*ze/pow_e2, 		3*ye*ze/pow_e2, 	3*pow(ze,2)/pow_e2 - 1] ])
+		sun_dadr = MIU_S/pow(norm_sun, 3) * np.array([ [3*pow(xs,2)/pow_s2 - 1, 	3*xs*ys/pow_s2, 		3*xs*zs/pow_s2],
+														[3*xs*ys/pow_s2, 		3*pow(ys,2)/pow_s2 - 1, 	3*ys*zs/pow_s2],
+														[3*xs*zs/pow_s2, 		3*ys*zs/pow_s2, 			3*pow(zs,2)/pow_s2 - 1] ])
+		return earth_dadr + sun_dadr
 		
 		
 	def partial_nonspher(self, r_sat, time_utc, miu=MIU_M, Re=RM, lm=30):
