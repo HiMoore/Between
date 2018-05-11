@@ -5,9 +5,7 @@ import pandas as pd
 from scipy.integrate import solve_ivp, odeint, ode
 from matplotlib import pyplot as plt
 from math import *
-from orbit import *
-from orbit_predictor.keplerian import rv2coe
-from orbit_predictor.angles import ta_to_M, M_to_ta
+from orbit_km import *
 
 
 
@@ -19,8 +17,8 @@ class Test_Orbit(Orbit):
 	def singleDay_error(self):
 		number, t0 = 720, 0
 		# HPOP = pd.read_csv("STK/Inertial_HPOP_30d.csv", nrows=number, usecols=range(1,7))	# 取前number个点进行试算
-		HPOP = pd.read_csv("STK/Inertial_HPOP_660.csv", nrows=number, usecols=range(1,7))	# 取前number个点进行试算
-		TwoBody = pd.read_csv("STK/Inertial_TwoBody_30d.csv", nrows=number, usecols=range(1,7))		# 取前number个点进行试算
+		HPOP = np.load("STK/HPOP_1.npy")[:number]
+		TwoBody = pd.read_csv("STK/Part_2/Inertial_TwoBody_30d.csv", nrows=number, usecols=range(1,7))		# 取前number个点进行试算
 		HPOP = np.array(HPOP).T
 		TwoBody = np.array(TwoBody).T
 		rv_0 = HPOP[:, 0]

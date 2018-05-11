@@ -18,7 +18,7 @@ MIU_E, MIU_M, MIU_S = 398600.4415, 4902.80030555540, 132712422595.6590		# 引力
 RE, RM, RS = 6378.1363, 1738.000, 69550.0		#天体半径，单位 km
 CSD_MAX, CSD_EPS, number, CSD_LM = 1e+30, 1e-10, 495, 30
 STEP, Beta = 120, 0		#全局积分步长, 太阳光压参数
-C, S = np.load("Clm.npy"), np.load("Slm.npy")	# 序列化后代码速度提高4倍
+C, S = np.load("STK/Clm.npy"), np.load("STK/Slm.npy")	# 序列化后代码速度提高4倍
 
 
 # 计算常值变量与函数区, 加速运算过程
@@ -35,7 +35,7 @@ M_Array = np.array([ j for j in range(0, CSD_LM+1) ])
 Rx_bas = lambda x: np.array([[1, 0, 0], [0, cos(x), sin(x)], [0, -sin(x), cos(x)]])
 Ry_bas = lambda y: np.array([[cos(y), 0, -sin(y)], [0, 1, 0], [sin(y),0, cos(x)]])
 Rz_bas = lambda z: np.array([[cos(z), sin(z), 0], [-sin(z), cos(z), 0], [0, 0, 1]])
-LCS2I = np.dot( Rx_bas(radians(24.358897)), Rz_bas(radians(-3.14227)) )	# 月心天球 -> 月心惯性系
+LCS2I = np.dot( Rx_bas(radians(24.358897)), Rz_bas(radians(-3.14227)) )		# 月心天球 -> 月心惯性系
 
 
 
@@ -211,13 +211,13 @@ class Orbit:
 		V.extend(F)
 		return np.array(V)		# km/s, km/s^2
 		
-	@fn_timer	
+		
 	def integrate_orbit(self, rv_0, num):
 		'''数值积分器，使用RK45获得卫星递推轨道'''
 		ode_y = solve_ivp( self.complete_dynamic, (0,STEP*num), rv_0, method="RK45", rtol=1e-6, atol=1e-9, \
-							t_eval=range(0,STEP*num, STEP) ).y
+							t_eval=range(0, STEP*num, STEP) ).y
 		return ode_y
-	
+
 
 	def partial_centre(self, r_sat, miu=MIU_M):
 		'''中心引力加速度对 (x, y, z) 的偏导数在月惯系下的表达, 单位 1/s^2'''
@@ -298,7 +298,7 @@ class Orbit:
 	def coefMatrix_single(self, r_sat, tdb_jd):
 		'''单颗卫星构成的状态方程的Jaccobian矩阵计算公式中的系数矩阵项,  王正涛(eq 3-3-5)
 		输出: 状态转移矩阵一阶微分方程的系数矩阵, np.array([ [0, I], [da_dr, da_dv] ]);  	平均计算时间0.004s'''
-		da_dr = self.partial_centre(r_sat)# + self.partial_nonspher(r_sat, tdb_jd) + self.partial_third(r_sat, tdb_jd)
+		da_dr = self.partial_centre(r_sat) + self.partial_nonspher(r_sat, tdb_jd) + self.partial_third(r_sat, tdb_jd)
 		da_dv, O, I = np.zeros((3,3)), np.zeros((3,3)), np.identity(3)
 		up, low = np.hstack((O, I)), np.hstack((da_dr, da_dv))
 		M_st = np.vstack((up, low))		# 6*6
@@ -322,9 +322,13 @@ if __name__ == "__main__":
 	rFixed_list = [ np.dot(I2F, r_sat) for (I2F, r_sat) in zip(I2F_list, r_array) ]
 	r_sat, r_fixed, RV, time_utc = r_array[0], rFixed_list[0], RV_array[0], utc_array[0]
 	utc_jd, tdb_jd = time_utc.to_julian_date(), time_utc.to_julian_date() + 69.184/86400
-	da_1 = [ ob.partial_third(r_sat, time_tdb) for r_sat, time_tdb in zip(r_array, tdbJD_list) ]
-	da_2 = [ ob.partial_third_2(r_sat, time_tdb) for r_sat, time_tdb in zip(r_array, tdbJD_list) ]
-	print(da_1[:5], "\n\n", da_2[:5])
-	# nonsper = [ ob.partial_nonspher(r_sat, tdb_jd) for (r_sat, tdb_jd) in zip(r_array, tdbJD_list) ]
+	# da_1 = [ ob.partial_centre(r_sat) for r_sat in r_array ]
+	# da_2 = [ ob.partial_nonspher(r_sat, tdb_jd) for (r_sat, tdb_jd) in zip(r_array, tdbJD_list) ]
+	# da_3 = [ ob.partial_third(r_sat, time_tdb) for r_sat, time_tdb in zip(r_array, tdbJD_list) ]
+	# print(da_1[:5], "\n\n", da_2[:5], "\n\n", da_3[:5])
+	X0 = np.array([ 1.84032000e+03,  0.00000000e+00,  0.00000000e+00, -0.00000000e+00,
+        1.57132000e+00,  8.53157000e-01,  1.81730685e+03,  5.57488500e+00,
+        3.02691500e+00, -5.21200000e-03,  1.58780000e+00,  8.62105000e-01])
+	print(ob.complete_output(X0, 0))
 
 	
