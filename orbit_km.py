@@ -4,20 +4,18 @@ import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 from math import *
-from operator import mod
 from datetime import datetime, timedelta
 import de421
 from jplephem import Ephemeris
 from jplephem.spk import SPK
-from scipy.integrate import solve_ivp, RK45
+from scipy.integrate import solve_ivp
 
 
 
 # 恒定常值变量区
 MIU_E, MIU_M, MIU_S = 398600.4415, 4902.80030555540, 132712422595.6590		# 引力系数，单位 km^3 / s^2
 RE, RM, RS = 6378.1363, 1738.000, 69550.0		#天体半径，单位 km
-CSD_MAX, CSD_EPS, number, CSD_LM = 1e+30, 1e-10, 495, 30
-STEP, Beta = 120, 0		#全局积分步长, 太阳光压参数
+number, CSD_LM, STEP = 495, 30, 120	#全局积分步长
 C, S = np.load("STK/Clm.npy"), np.load("STK/Slm.npy")	# 序列化后代码速度提高4倍
 
 
@@ -71,7 +69,7 @@ class Orbit:
 		Clm, Slm = f["Clm"], f["Slm"]
 		Clm = [ np.array(Clm.loc[i]) for i in range(0, n+1) ]
 		Slm = [ np.array(Slm.loc[i]) for i in range(0, n+1) ]
-		np.save("Clm.npy", Clm); np.save("Slm.npy", Slm)	
+		np.save("STK/Clm.npy", Clm); np.save("STK/Slm.npy", Slm)	
 		
 		
 	def generate_time(self, start_t="20171231", end_t="20180101"):
@@ -143,27 +141,27 @@ class Orbit:
 	def nonspher_moon(self, r_sat, tdb_jd, miu=MIU_M, Re=RM, lm=CSD_LM):
 		'''计算月球的非球形引力加速度，single-time, Brandon A. Jones - Efficient Models for the Evaluation and Estimation(eq. 2.14)
 		输入：惯性系下卫星位置矢量r_sat，np.array, 单位 km;		TDB的儒略日时间;	miu默认为月球;
-		输出：返回非球形引力摄动加速度, np.array，单位 km/s^2'''
+		输出：返回非球形引力摄动加速度, ndarray，单位 km/s^2'''
 		I2F = self.moon_Cbi(tdb_jd)	# 月惯系到月固系的方向余弦矩阵 3*3
 		r_fixed = np.dot(I2F, r_sat)		# 应该在固连系下建立，王正涛
-		xy_norm, r_norm = np.linalg.norm(r_fixed, 2), np.linalg.norm(r_fixed[:2], 2)	# Keric A. Hill-Autonomous Navigation in Libration Point
-		phi, lamda, tan_phi = asin(r_fixed[2] / r_norm), atan2(r_fixed[1], r_fixed[0]), r_fixed[2]/xy_norm	
-		P = self.legendre_spher_alfs(phi, lm)	# 勒让德函数
-		rRatio, dR_dr = Re/r_norm, r_fixed / r_norm	# 球坐标对直角坐标的偏导数, Keric Hill(eq. 8.10), Brandon Jones(eq. 2.13)
-		dphi_dr = 1/xy_norm * np.array([ -r_fixed[0]*r_fixed[2] / pow(r_norm, 2), -r_fixed[1]*r_fixed[2] / pow(r_norm, 2), \
-									1 - pow(r_fixed[2], 2) / pow(r_norm, 2) ])
-		dlamda_dr = 1/pow(xy_norm, 2) * np.array([ -r_fixed[1], r_fixed[0], 0 ])
+		r_norm, xy_norm = np.linalg.norm(r_fixed, 2), np.linalg.norm(r_fixed[:2], 2)
+		phi, lamda = asin(r_fixed[2] / r_norm), atan2(r_fixed[1], r_fixed[0])
+		rRatio, pow_r2, tan_phi = Re/r_norm, pow(r_norm, 2), r_fixed[2]/xy_norm
 		cos_m = np.array([ cos(j*lamda) for j in range(0, lm+1) ])
 		sin_m = np.array([ sin(j*lamda) for j in range(0, lm+1) ])
-		dU_dr = -miu/pow(r_norm, 2) * sum([ pow(rRatio, i)*(i+1) * np.dot(P[i][:-1], C[i]*cos_m[:i+1]+ S[i]*sin_m[:i+1]) for i in range(2, lm+1) ]) 
+		P = self.legendre_spher_alfs(phi, lm)	# 勒让德函数
+		dU_dr = -miu/pow_r2 * sum([ pow(rRatio, i)*(i+1) * np.dot(P[i][:-1], C[i]*cos_m[:i+1] + S[i]*sin_m[:i+1]) for i in range(2, lm+1) ]) 
 		dU_dphi = miu/r_norm * sum([ pow(rRatio, i) * np.dot(P[i][1:] * pi_dot[i] -  tan_phi*M_Array[:i+1] * P[i][:-1], \
 							C[i]*cos_m[:i+1] + S[i]*sin_m[:i+1]) for i in range(2, lm+1) ])
 		dU_dlamda = miu/r_norm * sum([ pow(rRatio, i) * np.dot(M_Array[:i+1]*P[i][:-1], S[i]*cos_m[:i+1] - C[i]*sin_m[:i+1]) for i in range(2, lm+1) ])
+		dR_dr = r_fixed / r_norm	# 球坐标对直角坐标的偏导数, Keric Hill(eq. 8.10), Brandon Jones(eq. 2.13)
+		dphi_dr = 1/xy_norm * np.array([ -r_fixed[0]*r_fixed[2]/pow_r2,  -r_fixed[1]*r_fixed[2]/pow_r2,  1 - pow(r_fixed[2], 2)/pow_r2 ])
+		dlamda_dr = 1/pow(xy_norm, 2) * np.array([ -r_fixed[1], r_fixed[0], 0 ])
 		a_fixed = dR_dr * dU_dr + dphi_dr * dU_dphi + dlamda_dr * dU_dlamda
-		a_inertial = np.dot(I2F.T, a_fixed)
-		return a_inertial	# km/s^2
-
+		a_inertial = np.dot(I2F.T, a_fixed)	# 将月固系下加速度转换到月惯系下
+		return a_inertial	# km/s^2, 3*1
 		
+
 	def thirdSun(self, r_sat, tdb_jd):
 		'''计算太阳对卫星产生的第三天体摄动加速度, single-time, 输入 km, 输出 km/s^2
 		输入：UTC时间time_utc，卫星相对中心天体的矢量，km, 均为np.array；
@@ -211,10 +209,10 @@ class Orbit:
 		V.extend(F)
 		return np.array(V)		# km/s, km/s^2
 		
-		
+	@fn_timer	
 	def integrate_orbit(self, rv_0, num):
 		'''数值积分器，使用RK45获得卫星递推轨道'''
-		ode_y = solve_ivp( self.complete_dynamic, (0,STEP*num), rv_0, method="RK45", rtol=1e-6, atol=1e-9, \
+		ode_y = solve_ivp( self.complete_dynamic, (0,STEP*num), rv_0, method="RK45", rtol=1e-9, atol=1e-12, \
 							t_eval=range(0, STEP*num, STEP) ).y
 		return ode_y
 
@@ -310,25 +308,23 @@ class Orbit:
 if __name__ == "__main__":
 	
 	ob = Orbit()
-	number = 100
+	number = 10
 	data = pd.read_csv("STK/Part_2/1_Inertial_HPOP_660.csv", nrows=number, usecols=range(1, 7))	# 取前number个点进行试算
 	RV_array = data.values
 	r_array = RV_array[:, :3]
 	t_list = range(0, number*STEP, STEP)
-	utc_array = (ob.generate_time(start_t="20180101", end_t="20180331"))[:number]
+	utc_array = (ob.generate_time(start_t="20180101", end_t="20180131"))[:number]
 	utcJD_list = [ time_utc.to_julian_date() for time_utc in utc_array ]
 	tdbJD_list = [ time_utc.to_julian_date() + 69.184/86400 for time_utc in utc_array ]
 	I2F_list = [ ob.moon_Cbi(tdb_jd) for tdb_jd in tdbJD_list ]
 	rFixed_list = [ np.dot(I2F, r_sat) for (I2F, r_sat) in zip(I2F_list, r_array) ]
 	r_sat, r_fixed, RV, time_utc = r_array[0], rFixed_list[0], RV_array[0], utc_array[0]
 	utc_jd, tdb_jd = time_utc.to_julian_date(), time_utc.to_julian_date() + 69.184/86400
-	# da_1 = [ ob.partial_centre(r_sat) for r_sat in r_array ]
-	# da_2 = [ ob.partial_nonspher(r_sat, tdb_jd) for (r_sat, tdb_jd) in zip(r_array, tdbJD_list) ]
-	# da_3 = [ ob.partial_third(r_sat, time_tdb) for r_sat, time_tdb in zip(r_array, tdbJD_list) ]
-	# print(da_1[:5], "\n\n", da_2[:5], "\n\n", da_3[:5])
-	X0 = np.array([ 1.84032000e+03,  0.00000000e+00,  0.00000000e+00, -0.00000000e+00,
-        1.57132000e+00,  8.53157000e-01,  1.81730685e+03,  5.57488500e+00,
-        3.02691500e+00, -5.21200000e-03,  1.58780000e+00,  8.62105000e-01])
-	print(ob.complete_output(X0, 0))
-
+	da_1 = np.array([ ob.nonspherGravity(r_sat, tdb_jd) for (r_sat, tdb_jd) in zip(r_array, tdbJD_list) ])
+	da_2 = np.array([ ob.nonspher_moon(r_sat, tdb_jd) for (r_sat, tdb_jd) in zip(r_array, tdbJD_list) ])
+	da_3 = np.array([ ob.nonspher_moongravity(r_sat, time_tdb) for r_sat, time_tdb in zip(r_array, tdbJD_list) ])
+	da_4 = [ ob.thirdEarth(r_sat, time_tdb) for r_sat, time_tdb in zip(r_array, tdbJD_list) ]
+	print(da_1[:5], "\n\n", da_2[:5], "\n\n", da_3[:5])
+	X0 = np.array([ 1.84032000e+03,  0.00000000e+00,  0.00000000e+00, -0.00000000e+00, 1.57132000e+00,  8.53157000e-01])
+	# ode_y = ob.integrate_orbit(X0, number)
 	

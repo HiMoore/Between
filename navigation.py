@@ -45,17 +45,7 @@ class Navigation(Orbit):
 		ode_y = (solution.y).reshape(12, 12, order="F")
 		return bsr_matrix(ode_y, blocksize=(6,6))	# 12*12, sparse (half zero)
 		
-		
-	def measure_stk(self, i):
-		'''双星系统的测量方程的实际测量输出 Zk = h(Xk) + Vk, 由STK生成并加入噪声, ndarray'''
-		delta_r = HPOP_1[i, :3] - HPOP_2[i, :3]
-		r_norm = np.linalg.norm(delta_r, 2)
-		v_rk = np.random.normal(loc=0, scale=1e-3)	# 测距噪声, 0均值, 测量标准差为1e-3 km
-		v_dk = np.random.multivariate_normal(mean=[0,0,0], cov=10/3600*np.identity(3))	# 测角噪声, 0均值, 协方差为 10角秒*I
-		Z = [ r_norm + v_rk];   Z.extend(delta_r/r_norm + v_dk)
-		return np.array(Z)	# np.array, (4, )
 
-		
 	def jacobian_measure(self, r1, r2):
 		'''计算双星测量模型的Jacobian矩阵, Hk = bsr([ [dh1_dr1, O, dh1_dr2, O], [dh2_dr1, O, dh2_dr2, O] ]),  4*12'''
 		r1_r2, zeros = r1-r2, np.zeros((3,3))
@@ -104,15 +94,16 @@ class Navigation(Orbit):
 		plt.show()
 		
 		
-	def plot_filter(self, r1, r2, number):
-		r1, r2 = r1[:number, :3], r2[:number, :3]
-		plt.figure(1)
-		plt.plot(range(number), r1 - HPOP_1[:number, :3])
-		plt.figure(2)
-		plt.plot(range(number), r2 - HPOP_2[:number, :3])
-		plt.show()
+	def measure_stk(self, i):
+		'''双星系统的测量方程的实际测量输出 Zk = h(Xk) + Vk, 由STK生成并加入噪声, ndarray'''
+		delta_r = HPOP_1[i, :3] - HPOP_2[i, :3]
+		r_norm = np.linalg.norm(delta_r, 2)
+		v_rk = np.random.normal(loc=0, scale=1e-3)	# 测距噪声, 0均值, 测量标准差为1e-3 km
+		v_dk = np.random.multivariate_normal(mean=[0,0,0], cov=10/3600*np.identity(3))	# 测角噪声, 0均值, 协方差为 10角秒*I
+		Z = [ r_norm + v_rk];   Z.extend(delta_r/r_norm + v_dk)
+		return np.array(Z)	# np.array, (4, )
 		
-		
+
 	def complete_ukf(self, X, dt=STEP, Time=Time):
 		'''UKF的状态方程, X_k+1 = f(x_k) + w_k, ndarray;	 dt=120s, 为UKF的predict步长'''
 		X0, X1 = X[0:6], X[6:12]
@@ -122,16 +113,7 @@ class Navigation(Orbit):
 		y1L = [ x[0] for x in y1 ]; y2L = [ x[0] for x in y2 ]
 		y1L.extend(y2L); ode_y = np.array(y1L)
 		return ode_y
-		
-		
-	def complete_ukf(self, X, num, dt=STEP, Time=Time):
-		'''UKF的状态方程, X_k+1 = f(x_k) + w_k, ndarray;	 dt=120s, 为UKF的predict步长'''
-		X0, X1 = X[0:6], X[6:12]
-		print(Time)
-		y1 = solve_ivp( self.complete_dynamic, (0, STEP*num), X0, method="RK45", rtol=1e-6, atol=1e-9, t_eval=range(0, STEP*num, STEP) ).y
-		y2 = solve_ivp( self.complete_dynamic, (0, STEP*num), X1, method="RK45", rtol=1e-6, atol=1e-9, t_eval=range(0, STEP*num, STEP) ).y
-		return y1, y2
-		
+
 		
 	def measure_equation(self, X):
 		'''双星系统的测量方程, Z_k = h(X_k) + v_k, ndarray'''
@@ -141,7 +123,7 @@ class Navigation(Orbit):
 		return np.array(Z)	# np.array, (4, )
 		
 	@fn_timer		
-	def unscented_kf(self, number=20):
+	def unscented_kf(self, number=240):
 		X0 = np.hstack( (HPOP_1[0], HPOP_2[0]) )
 		P0 = np.diag( np.repeat(0.1, 12) )
 		Rk =  np.diag([1e-3, 10/3600, 10/3600, 10/3600])		# 4*4
@@ -171,7 +153,7 @@ if __name__ == "__main__":
 	ob = Orbit()
 	nav = Navigation()
 	
-	number = 240
+	number = 720
 	data = pd.read_csv("STK/Part_2/1_Inertial_HPOP_660.csv", nrows=number, usecols=range(1, 7))	# 取前number个点进行试算
 	RV_array = data.values
 	r_array = RV_array[:, :3]
@@ -187,11 +169,5 @@ if __name__ == "__main__":
 	HPOP = np.hstack((HPOP_1[:number], HPOP_2[:number]))
 	X = [ HPOP[0] ]
 	t = 0
-	# for i in range(1, number):
-		# ode_x = nav.complete_ukf(X[i-1], Time=t)
-		# X.append(ode_x)
-		# t += STEP
-	# X = np.array(X)
-	# nav.plot_filter(X, number)
-	r1, r2 = nav.complete_ukf(X[0], number)
-	nav.plot_filter(r1.T, r2.T, number)
+	
+	

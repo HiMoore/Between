@@ -25,23 +25,6 @@ for i in range(CSD_LM+1):
 	# PI_ij = [ sqrt( factorial(i+j) / (factorial(i-j)*2*(2*i+1)) ) for j in range(1, i+1) ]
 	# PI_ij.append(1); PI_i0.extend(PI_ij); PI.append(np.array(PI_i0))
 
-import time
-from functools import wraps
-import random 
- 
-def fn_timer(function):
-    @wraps(function)
-    def function_timer(*args, **kwargs):
-        t0 = time.time()
-        result = function(*args, **kwargs)
-        t1 = time.time()
-        print ("%s running: %s seconds" %
-               (function.__name__, str(t1-t0))
-               )
-        return result
-    return function_timer
-
-
 
 class Orbit:
 	r, v = [], []
@@ -397,6 +380,30 @@ class Orbit:
 			dp_i0.extend(dp_ij); deri_P.append(np.array(dp_i0))
 		return np.array(deri_P)
 		
+		
+	def nonspher_moon(self, r_sat, tdb_jd, miu=MIU_M, Re=RM, lm=CSD_LM):
+		'''计算月球的非球形引力加速度，single-time, Brandon A. Jones - Efficient Models for the Evaluation and Estimation(eq. 2.14)
+		输入：惯性系下卫星位置矢量r_sat，np.array, 单位 km;		TDB的儒略日时间;	miu默认为月球;
+		输出：返回非球形引力摄动加速度, np.array，单位 km/s^2'''
+		I2F = self.moon_Cbi(tdb_jd)	# 月惯系到月固系的方向余弦矩阵 3*3
+		r_fixed = np.dot(I2F, r_sat)		# 应该在固连系下建立，王正涛
+		xy_norm, r_norm = np.linalg.norm(r_fixed, 2), np.linalg.norm(r_fixed[:2], 2)	# Keric A. Hill - Autonomous Navigation
+		phi, lamda, tan_phi = asin(r_fixed[2] / r_norm), atan2(r_fixed[1], r_fixed[0]), r_fixed[2]/xy_norm	
+		P = self.legendre_spher_alfs(phi, lm)	# 勒让德函数
+		rRatio, pow_r2 = Re/r_norm, pow(r_norm, 2)
+		dR_dr = r_fixed / r_norm	# 球坐标对直角坐标的偏导数, Keric Hill(eq. 8.10), Brandon Jones(eq. 2.13)
+		dphi_dr = 1/xy_norm * np.array([ -r_fixed[0]*r_fixed[2]/pow_r2,  -r_fixed[1]*r_fixed[2]/pow_r2,  1 - pow(r_fixed[2], 2)/pow_r2 ])
+		dlamda_dr = 1/pow(xy_norm, 2) * np.array([ -r_fixed[1], r_fixed[0], 0 ])
+		cos_m = np.array([ cos(j*lamda) for j in range(0, lm+1) ])
+		sin_m = np.array([ sin(j*lamda) for j in range(0, lm+1) ])
+		dU_dr = -miu/pow_r2 * sum([ pow(rRatio, i)*(i+1) * np.dot(P[i][:-1], C[i]*cos_m[:i+1] + S[i]*sin_m[:i+1]) for i in range(2, lm+1) ]) 
+		dU_dphi = miu/r_norm * sum([ pow(rRatio, i) * np.dot(P[i][1:] * pi_dot[i] -  tan_phi*M_Array[:i+1] * P[i][:-1], \
+							C[i]*cos_m[:i+1] + S[i]*sin_m[:i+1]) for i in range(2, lm+1) ])
+		dU_dlamda = miu/r_norm * sum([ pow(rRatio, i) * np.dot(M_Array[:i+1]*P[i][:-1], S[i]*cos_m[:i+1] - C[i]*sin_m[:i+1]) for i in range(2, lm+1) ])
+		a_fixed = dR_dr * dU_dr + dphi_dr * dU_dphi + dlamda_dr * dU_dlamda
+		a_inertial = np.dot(I2F.T, a_fixed)
+		return a_inertial	# km/s^2
+		
 
 	def nonspherGravity(self, r_sat, tdb_jd, miu=MIU_M, Re=RM, lm=CSD_LM):
 		'''计算中心天体的非球形引力加速度，single-time, 输入 km, 输出 m/s^2, 王正涛-卫星跟踪卫星测量(公式2-4-7)
@@ -405,8 +412,8 @@ class Orbit:
 		I2F = self.moon_Cbi(tdb_jd)	# 月惯系到月固系的方向余弦矩阵 3*3
 		r_fixed = np.dot(I2F, r_sat)		# 应该在固连系下建立，王正涛
 		r_norm = np.linalg.norm(r_fixed, 2)
-		xy_norm = 1/np.linalg.norm(r_fixed[:2], 2)
-		phi, lamda = atan2(r_fixed[2], 1/xy_norm), atan2(r_fixed[1], r_fixed[0])
+		xy_norm = np.linalg.norm(r_fixed[:2], 2)
+		phi, lamda = atan2(r_fixed[2], xy_norm), atan2(r_fixed[1], r_fixed[0])
 		spher2rect = np.array([ [cos(phi)*cos(lamda), cos(phi)*sin(lamda), sin(phi)], \
 					[(-1/r_norm)*sin(phi)*cos(lamda), (-1/r_norm)*sin(phi)*sin(lamda),  (1/r_norm)*cos(phi)], \
 					[(-1/r_norm)*sin(lamda)/cos(phi), (1/r_norm)*cos(lamda)/cos(phi), 0] ])	#球坐标到直角坐标 3*3
@@ -417,7 +424,7 @@ class Orbit:
 			for j in range(0, i+1):
 				Vr += ( C[i][j]*cos(j*lamda) + S[i][j]*sin(j*lamda) ) * P[i][j] * temp_r
 				Vphi += ( C[i][j]*cos(j*lamda) + S[i][j]*sin(j*lamda) ) * \
-						( pi_dot[i][j] * P[i][j+1] - j * r_fixed[2]*xy_norm * P[i][j] ) * temp 	# check dP_lm!
+						( pi_dot[i][j] * P[i][j+1] - j * r_fixed[2]/xy_norm * P[i][j] ) * temp 	# check dP_lm!
 				Vlamda += ( -C[i][j]*sin(j*lamda) + S[i][j]*cos(j*lamda) ) * P[i][j] * temp * j
 		g1 = np.array([-miu/r_norm**2*Vr, miu/r_norm*Vphi, miu/r_norm*Vlamda])	# 非球形引力 3*1
 		g1 = np.dot(g1, spher2rect)	 # 球坐标到直角坐标，乘积顺序不要反了
@@ -427,16 +434,15 @@ class Orbit:
 		
 	def nonspher_moongravity(self, r_sat, tdb_jd, miu=MIU_M, Re=RM, lm=CSD_LM):
 		'''计算月球的非球形引力加速度，迭代版本, Brandon A. Jones - Efficient Models for the Evaluation and Estimation(eq. 2.14)'''
-		I2F = self.moon_Cbi(tdb_jd)
-		r_fixed = np.dot(I2F, r_sat)
-		r_norm = np.linalg.norm(r_fixed, 2)
-		xy_norm = 1/np.linalg.norm(r_fixed[:2], 2)
-		phic, lamda = asin(r_fixed[2]/r_norm), atan2(r_fixed[1], r_fixed[0])
-		P = self.legendre_spher_alfs(phic, lm)	# 至此，cos_m, sin_m, P, pi_dot均与Matlab一致
-		dR_dr = r_fixed / r_norm
-		dphi_dr = xy_norm * np.array([ -r_fixed[0]*r_fixed[2] / pow(r_norm, 2), -r_fixed[1]*r_fixed[2] / pow(r_norm, 2), \
-									1 - pow(r_fixed[2], 2) / pow(r_norm, 2) ])
-		dlamda_dr = pow(xy_norm, 2) * np.array([ -r_fixed[1], r_fixed[0], 0 ])
+		I2F = self.moon_Cbi(tdb_jd)	# 月惯系到月固系的方向余弦矩阵 3*3
+		r_fixed = np.dot(I2F, r_sat)		# 应该在固连系下建立，王正涛
+		xy_norm, r_norm = np.linalg.norm(r_fixed, 2), np.linalg.norm(r_fixed[:2], 2)	# Keric A. Hill - Autonomous Navigation
+		phi, lamda, tan_phi = asin(r_fixed[2] / r_norm), atan2(r_fixed[1], r_fixed[0]), r_fixed[2]/xy_norm	
+		P = self.legendre_spher_alfs(phi, lm)	# 勒让德函数
+		rRatio, pow_r2 = Re/r_norm, pow(r_norm, 2)
+		dR_dr = r_fixed / r_norm	# 球坐标对直角坐标的偏导数, Keric Hill(eq. 8.10), Brandon Jones(eq. 2.13)
+		dphi_dr = 1/xy_norm * np.array([ -r_fixed[0]*r_fixed[2]/pow_r2,  -r_fixed[1]*r_fixed[2]/pow_r2,  1 - pow(r_fixed[2], 2)/pow_r2 ])
+		dlamda_dr = 1/pow(xy_norm, 2) * np.array([ -r_fixed[1], r_fixed[0], 0 ])
 		dU_dr, dU_dphi, dU_dlamda = 0, 0, 0
 		rRatio = Re / r_norm
 		cos_m, sin_m = np.zeros(lm+2), np.zeros(lm+2)
@@ -448,7 +454,7 @@ class Orbit:
 			rRatio_n = pow(rRatio, i)
 			for j in range(i+1):
 				dU_dr +=  P[i][j] * ( C[i][j] * cos_m[j] + S[i][j] * sin_m[j] ) * rRatio_n * (i+1)
-				dU_dphi +=  ( P[i][j+1] * pi_dot[i][j] - j * r_fixed[2]*xy_norm * P[i][j] ) * \
+				dU_dphi +=  ( P[i][j+1] * pi_dot[i][j] - j * r_fixed[2]/xy_norm * P[i][j] ) * \
 							( C[i][j]*cos_m[j] + S[i][j]*sin_m[j] )* rRatio_n
 				dU_dlamda += j * P[i][j] * ( S[i][j]*cos_m[j] - C[i][j]*sin_m[j] )* rRatio_n
 		dU_dr, dU_dphi, dU_dlamda = -miu/r_norm**2*dU_dr, miu/r_norm*dU_dphi, miu/r_norm*dU_dlamda	# 非球形引力 3*1
