@@ -21,7 +21,6 @@ class Test_Orbit(Orbit):
 		rv_0 = TwoBody[:, 0]
 		print(rv_0)
 		orbit = self.integrate_orbit(rv_0, number)
-		# orbit = np.array( pd.read_csv("STK/Part_2/LP165_Inertial_HPOP_30.csv", nrows=number, usecols=range(1,7)) ).T
 		delta_1 = HPOP - TwoBody
 		delta_2 = (orbit - TwoBody)
 		delta_3 = HPOP - orbit

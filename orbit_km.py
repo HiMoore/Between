@@ -200,6 +200,7 @@ class Orbit:
 		输入：	时间t，从0开始（好像不太重要）; 	惯性系下位置速度	km, km/s, np.array
 		输出：	返回d(RV)/dt，动力学增量, np.array, 1*6, m/s, m/s^2'''
 		tdb_jd = (time_utc+int(t)).to_julian_date() + 69.184/86400
+		# print("utc_jd:", time_utc.to_julian_date(), '\t', "t:", t, '\t', "tdb_jd:", tdb_jd)
 		R, V = RV[:3], (RV[3:]).tolist()	# km, km/s
 		F0 = self.centreGravity(R, miu)
 		F1 = self.nonspher_moon(R, tdb_jd, miu, Re, lm)
@@ -209,7 +210,7 @@ class Orbit:
 		V.extend(F)
 		return np.array(V)		# km/s, km/s^2
 		
-	@fn_timer	
+	@fn_timer
 	def integrate_orbit(self, rv_0, num):
 		'''数值积分器，使用RK45获得卫星递推轨道'''
 		ode_y = solve_ivp( self.complete_dynamic, (0,STEP*num), rv_0, method="RK45", rtol=1e-9, atol=1e-12, \

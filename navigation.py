@@ -88,9 +88,9 @@ class Navigation(Orbit):
 	def plot_filter(self, X, number):
 		r1, r2 = X[:number, :3], X[:number, 6:9]
 		plt.figure(1)
-		plt.plot(range(number), r1 - HPOP_1[:number, :3])
+		plt.plot(range(number), r1[:number] - HPOP_1[:number, :3])
 		plt.figure(2)
-		plt.plot(range(number), r2 - HPOP_2[:number, :3])
+		plt.plot(range(number), r2[:number] - HPOP_2[:number, :3])
 		plt.show()
 		
 		
@@ -98,23 +98,21 @@ class Navigation(Orbit):
 		'''双星系统的测量方程的实际测量输出 Zk = h(Xk) + Vk, 由STK生成并加入噪声, ndarray'''
 		delta_r = HPOP_1[i, :3] - HPOP_2[i, :3]
 		r_norm = np.linalg.norm(delta_r, 2)
-		v_rk = np.random.normal(loc=0, scale=1e-3)	# 测距噪声, 0均值, 测量标准差为1e-3 km
-		v_dk = np.random.multivariate_normal(mean=[0,0,0], cov=10/3600*np.identity(3))	# 测角噪声, 0均值, 协方差为 10角秒*I
+		v_rk = np.random.normal(loc=0, scale=5e-3)	# 测距噪声, 0均值, 测量标准差为5e-3 km
+		v_dk = np.random.multivariate_normal(mean=[0,0,0], cov=radians(10/3600)*np.identity(3))	# 测角噪声, 0均值, 协方差为 10角秒*I
 		Z = [ r_norm + v_rk];   Z.extend(delta_r/r_norm + v_dk)
 		return np.array(Z)	# np.array, (4, )
 		
+	
+	def state_equation(self, X, dt=STEP):
+		'''UKF的状态方程, X_k+1 = f(x_k) + w_k, ndarray;	 dt=120s, 为UKF的predict步长;	 计算时间0.20s'''
+		global Time
+		X1, X2 = X[0:6], X[6:12]
+		ode_y1 = solve_ivp( self.complete_dynamic, (Time, Time+dt), X1, method="RK45", rtol=1e-9, atol=1e-12, t_eval=[Time+dt] ).y
+		ode_y2 = solve_ivp( self.complete_dynamic, (Time, Time+dt), X2, method="RK45", rtol=1e-9, atol=1e-12, t_eval=[Time+dt] ).y
+		y_list = [ x[0] for x in ode_y1 ]; y2 = [ x[0] for x in ode_y2 ]; y_list.extend(y2)
+		return np.array(y_list)
 
-	def complete_ukf(self, X, dt=STEP, Time=Time):
-		'''UKF的状态方程, X_k+1 = f(x_k) + w_k, ndarray;	 dt=120s, 为UKF的predict步长'''
-		X0, X1 = X[0:6], X[6:12]
-		print(Time)
-		y1 = solve_ivp( self.complete_dynamic, (Time, Time+dt), X0, method="RK45", rtol=1e-6, atol=1e-9, t_eval=[Time+dt] ).y
-		y2 = solve_ivp( self.complete_dynamic, (Time, Time+dt), X1, method="RK45", rtol=1e-6, atol=1e-9, t_eval=[Time+dt] ).y
-		y1L = [ x[0] for x in y1 ]; y2L = [ x[0] for x in y2 ]
-		y1L.extend(y2L); ode_y = np.array(y1L)
-		return ode_y
-
-		
 	def measure_equation(self, X):
 		'''双星系统的测量方程, Z_k = h(X_k) + v_k, ndarray'''
 		delta_r = X[0:3] - X[6:9]
@@ -122,28 +120,36 @@ class Navigation(Orbit):
 		Z = [r_norm];   Z.extend(delta_r/r_norm)
 		return np.array(Z)	# np.array, (4, )
 		
-	@fn_timer		
-	def unscented_kf(self, number=240):
-		X0 = np.hstack( (HPOP_1[0], HPOP_2[0]) )
-		P0 = np.diag( np.repeat(0.1, 12) )
-		Rk =  np.diag([1e-3, 10/3600, 10/3600, 10/3600])		# 4*4
-		Qk = np.diag( np.repeat(0.1, 12) )		# 12*12
-		points = MerweScaledSigmaPoints(n=12, alpha=0.1, beta=2, kappa=-9)
-		ukf = UKF(dim_x=12, dim_z=4, fx=self.complete_ukf, hx=self.measure_equation, dt=STEP, points=points)
-		ukf.x = X0
-		ukf.P = P0
-		ukf.R = Rk
-		ukf.Q = Qk
-		uxs = []
+	
+	def unscented_kf(self, number=number):
 		global Time
-		for i in range(number):	
-			Z = self.measure_stk(i)
+		P0 = np.diag([ 9.53e-1, 5.71e-1, 8.15e-1, 9.64e-7, 1.04e-6, 8.01e-7, 8.98e-1, 1.11, 1.12, 7.24e-7, 7.95e-7, 9.93e-7 ])
+		error = np.random.multivariate_normal(mean=np.zeros(12), cov=P0)
+		X0 = np.hstack( (HPOP_1[0], HPOP_2[0]) ) + error
+		Rk =  np.diag( np.power([1e-3, radians(10/3600), radians(10/3600), radians(10/3600)], 2) )		# 4*4, sigma_r*I
+		Qk = np.diag([ 1e-4, 1e-4, 1e-4, 1e-8, 1e-8, 1e-8, 1e-4, 1e-4, 1e-4, 1e-8, 1e-8, 1e-8 ])		# 12*12
+		points = MerweScaledSigmaPoints(n=12, alpha=0.001, beta=2.0, kappa=-9)
+		ukf = UKF(dim_x=12, dim_z=4, fx=self.state_equation, hx=self.measure_equation, dt=STEP, points=points)
+		ukf.x = X0; ukf.P = P0; ukf.R = Rk; ukf.Q = Qk; XF, XP = [X0], [X0]
+		for i in range(1, number+1):
 			ukf.predict()
+			Z = nav.measure_stk(i)
 			ukf.update(Z)
-			uxs.append(ukf.x.copy())
+			X_Up = ukf.x.copy(); XF.append(X_Up)
 			Time = Time+STEP
-		uxs = np.array(uxs)
-		return uxs
+		XF = np.array(XF)
+		return XF
+		
+	@fn_timer	# 163s, 误差3km
+	def error_stateEq_ukf(self, number):
+		error = np.array([ 0.1, 0.1, 0.1, 1e-3, 1e-3, 1e-3, 0.1, 0.1, 0.1, 1e-3, 1e-3, 1e-3 ])
+		X0 = np.hstack( (HPOP_1[0], HPOP_2[0]) )
+		X, D = [ X0 ], []
+		for i in range(1, number):
+			New_X = self.state_equation(X[i-1])
+			X.append(New_X)
+		X = np.array(X)
+		return X
 
 		
 		
@@ -152,22 +158,12 @@ if __name__ == "__main__":
 	import cProfile, pstats
 	ob = Orbit()
 	nav = Navigation()
+	number = 240
 	
-	number = 720
-	data = pd.read_csv("STK/Part_2/1_Inertial_HPOP_660.csv", nrows=number, usecols=range(1, 7))	# 取前number个点进行试算
-	RV_array = data.values
-	r_array = RV_array[:, :3]
-	t_list = range(0, number*STEP, STEP)
-	utc_array = (ob.generate_time(start_t="20180101", end_t="20180331"))[:number]
-	utcJD_list = [ time_utc.to_julian_date() for time_utc in utc_array ]
-	tdbJD_list = [ time_utc.to_julian_date() + 69.184/86400 for time_utc in utc_array ]
-	I2F_list = [ ob.moon_Cbi(tdb_jd) for tdb_jd in tdbJD_list ]
-	rFixed_list = [ np.dot(I2F, r_sat) for (I2F, r_sat) in zip(I2F_list, r_array) ]
-	r_sat, r_fixed, RV, time_utc = r_array[0], rFixed_list[0], RV_array[0], utc_array[0]
-	utc_jd, tdb_jd = time_utc.to_julian_date(), time_utc.to_julian_date() + 69.184/86400
 	t, r1, r2 = 0, HPOP_1[0, :3], HPOP_2[0, :3]
 	HPOP = np.hstack((HPOP_1[:number], HPOP_2[:number]))
 	X = [ HPOP[0] ]
-	t = 0
-	
-	
+	X0 = np.hstack( (HPOP_1[0], HPOP_2[0]) )
+	X = nav.unscented_kf(number)
+	nav.plot_filter(X, number)
+	delta_x = np.array([ 9.76e2, 7.56e2, 9.03e2, 9.82e-1, 1.02, 8.95e-1, 9.48e2, 1.05e3, 1.06e3, 1.06, 8.51e-1, 8.92e-1 ])
