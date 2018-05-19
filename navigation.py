@@ -123,11 +123,11 @@ class Navigation(Orbit):
 	
 	def unscented_kf(self, number=number):
 		global Time
-		P0 = np.diag([ 9.53e-1, 5.71e-1, 8.15e-1, 9.64e-7, 1.04e-6, 8.01e-7, 8.98e-1, 1.11, 1.12, 7.24e-7, 7.95e-7, 9.93e-7 ])
+		P0 = np.diag([ 3e-1, 3e-1, 3e-1, 1e-6, 1e-6, 1e-6, 3e-1, 3e-1, 3e-1, 1e-6, 1e-6, 1e-6 ])
 		error = np.random.multivariate_normal(mean=np.zeros(12), cov=P0)
 		X0 = np.hstack( (HPOP_1[0], HPOP_2[0]) ) + error
-		Rk =  np.diag( np.power([1e-3, radians(10/3600), radians(10/3600), radians(10/3600)], 2) )		# 4*4, sigma_r*I
-		Qk = np.diag([ 1e-4, 1e-4, 1e-4, 1e-8, 1e-8, 1e-8, 1e-4, 1e-4, 1e-4, 1e-8, 1e-8, 1e-8 ])		# 12*12
+		Rk =  np.diag( [1e-3, radians(10/3600), radians(10/3600), radians(10/3600)] )	# 4*4, sigma_r*I
+		Qk = np.diag([ 1e-4, 1e-4, 1e-4, 1e-8, 1e-8, 1e-8, 1e-4, 1e-4, 1e-4, 1e-8, 1e-8, 1e-8 ]) / 1e-2	# 12*12
 		points = MerweScaledSigmaPoints(n=12, alpha=0.001, beta=2.0, kappa=-9)
 		ukf = UKF(dim_x=12, dim_z=4, fx=self.state_equation, hx=self.measure_equation, dt=STEP, points=points)
 		ukf.x = X0; ukf.P = P0; ukf.R = Rk; ukf.Q = Qk; XF, XP = [X0], [X0]
@@ -158,7 +158,7 @@ if __name__ == "__main__":
 	import cProfile, pstats
 	ob = Orbit()
 	nav = Navigation()
-	number = 240
+	number = 720
 	
 	t, r1, r2 = 0, HPOP_1[0, :3], HPOP_2[0, :3]
 	HPOP = np.hstack((HPOP_1[:number], HPOP_2[:number]))

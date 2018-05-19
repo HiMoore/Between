@@ -45,6 +45,38 @@ class Test_Orbit(Orbit):
 		
 		plt.show()
 		
+		
+	def draw_accelerate(self, number=200, step=120):
+		data = pd.read_csv("STK/Moon.csv")[:number]
+		del data["Time (UTCG)"]
+		data *= 1000
+		data.columns = ['x (m)', 'y (m)', 'z (m)', 'vx (m/sec)', 'vy (m/sec)', 'vz (m/sec)']
+		r_array = data[['x (m)', 'y (m)', 'z (m)']].values
+		orb = Orbit()
+		a0 = np.array([ np.linalg.norm(orb.centreGravity(r_sat=r_sat, miu=orbit.MIU_M, Re=1.738e+06), 2) for r_sat in r_array ])
+		utc_list = orb.generate_time(start_t="20171231", end_t="20180101")
+		a1 = np.array([ np.linalg.norm(orb.nonspherGravity(r_sat, time_utc)) for (r_sat, time_utc) in zip(r_array, utc_list) ])
+		a_solar = np.array([ np.linalg.norm(orb.solarPress(beta_last=0.75, time_utc=time_utc, r_sat=r_sat)) \
+				for (r_sat, time_utc) in zip(r_array, utc_list) ])
+		a_sun = np.array([ np.linalg.norm(orb.thirdSun(time_utc=time_utc, r_sat=r_sat, miu=orbit.MIU_S)) \
+				for (r_sat, time_utc) in zip(r_array, utc_list) ])
+		a_earth = np.array([ np.linalg.norm(orb.thirdEarth(time_utc=time_utc, r_sat=r_sat, miu=orbit.MIU_E)) \
+				for (r_sat, time_utc) in zip(r_array, utc_list) ])
+		time_range = range(0, number*step, step)
+		plt.figure(1)
+		plt.xlabel("Time / s", fontsize=18); plt.ylabel(r"$a / (m/s^2)$", fontsize=18)
+		plt.plot(time_range, a0, "r-", label="centre gravity")
+		a = a0+a1+a_solar+a_sun+a_earth
+		plt.plot(time_range, a, "g-", label="Combined acceleration")
+		plt.legend(fontsize=18); 
+		
+		plt.figure(2)
+		plt.xlabel("Time / s", fontsize=18); plt.ylabel(r"$a / (m/s^2)$", fontsize=18)
+		plt.plot(time_range, a1, "g--", label="nonspher gravity")
+		plt.plot(time_range, a_sun, "r-", label="third-sun gravity")
+		plt.plot(time_range, a_earth, "y-", label="third-earth gravity")
+		plt.plot(time_range, a_solar, "b-", label="solar pressure gravity")
+		plt.legend(fontsize=18); plt.show()
 
 
 

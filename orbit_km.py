@@ -98,7 +98,7 @@ class Orbit:
 		E_bc2M = kernel[3, 301].compute(tdb_jd)	# 地月中心 -> 月球
 		S_bc2E_bc = kernel[0, 3].compute(tdb_jd)	# 太阳系中心 -> 地月中心
 		S2S_bc = -kernel[0, 10].compute(tdb_jd)	# 太阳 -> 太阳系中心
-		return -(S2S_bc + S_bc2E_bc + E_bc2M)
+		return -(S2S_bc + S_bc2E_bc + E_bc2M)	# 月球 -> 太阳
 		
 		
 	def moon_Cbi(self, tdb_jd):
@@ -321,10 +321,11 @@ if __name__ == "__main__":
 	rFixed_list = [ np.dot(I2F, r_sat) for (I2F, r_sat) in zip(I2F_list, r_array) ]
 	r_sat, r_fixed, RV, time_utc = r_array[0], rFixed_list[0], RV_array[0], utc_array[0]
 	utc_jd, tdb_jd = time_utc.to_julian_date(), time_utc.to_julian_date() + 69.184/86400
-	da_1 = np.array([ ob.nonspherGravity(r_sat, tdb_jd) for (r_sat, tdb_jd) in zip(r_array, tdbJD_list) ])
-	da_2 = np.array([ ob.nonspher_moon(r_sat, tdb_jd) for (r_sat, tdb_jd) in zip(r_array, tdbJD_list) ])
-	da_3 = np.array([ ob.nonspher_moongravity(r_sat, time_tdb) for r_sat, time_tdb in zip(r_array, tdbJD_list) ])
-	da_4 = [ ob.thirdEarth(r_sat, time_tdb) for r_sat, time_tdb in zip(r_array, tdbJD_list) ]
+	print(utc_jd)
+	# da_1 = np.array([ ob.nonspherGravity(r_sat, tdb_jd) for (r_sat, tdb_jd) in zip(r_array, tdbJD_list) ])
+	# da_2 = np.array([ ob.nonspher_moon(r_sat, tdb_jd) for (r_sat, tdb_jd) in zip(r_array, tdbJD_list) ])
+	# da_3 = np.array([ ob.nonspher_moongravity(r_sat, time_tdb) for r_sat, time_tdb in zip(r_array, tdbJD_list) ])
+	# da_4 = [ ob.thirdEarth(r_sat, time_tdb) for r_sat, time_tdb in zip(r_array, tdbJD_list) ]
 	print(da_1[:5], "\n\n", da_2[:5], "\n\n", da_3[:5])
 	X0 = np.array([ 1.84032000e+03,  0.00000000e+00,  0.00000000e+00, -0.00000000e+00, 1.57132000e+00,  8.53157000e-01])
 	# ode_y = ob.integrate_orbit(X0, number)
