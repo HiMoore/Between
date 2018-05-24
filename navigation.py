@@ -15,6 +15,8 @@ from filterpy.kalman import UnscentedKalmanFilter as UKF
 HPOP_1 = np.load("STK/HPOP_1.npy")	# r, v
 HPOP_2 = np.load("STK/HPOP_2.npy")	# r, v
 Time = 0
+Qk = np.diag([ 1e-8, 1e-8, 1e-8, 1e-12, 1e-12, 1e-12, 1e-8, 1e-8, 1e-8, 1e-12, 1e-12, 1e-12 ]) * 1e-0	# 12*12
+Rk = np.power( np.diag( [1e-3, radians(10/3600), radians(10/3600), radians(10/3600)] ), 2 )	# 4*4, sigma_r*I
 
 
 class Navigation(Orbit):
@@ -87,9 +89,9 @@ class Navigation(Orbit):
 		
 	def plot_filter(self, X, number):
 		r1, r2 = X[:number, :3], X[:number, 6:9]
-		plt.figure(1)
+		plt.figure(1, figsize=(15,9))
 		plt.plot(range(number), r1[:number] - HPOP_1[:number, :3])
-		plt.figure(2)
+		plt.figure(2, figsize=(15,9))
 		plt.plot(range(number), r2[:number] - HPOP_2[:number, :3])
 		plt.show()
 		
@@ -98,8 +100,8 @@ class Navigation(Orbit):
 		'''双星系统的测量方程的实际测量输出 Zk = h(Xk) + Vk, 由STK生成并加入噪声, ndarray'''
 		delta_r = HPOP_1[i, :3] - HPOP_2[i, :3]
 		r_norm = np.linalg.norm(delta_r, 2)
-		v_rk = np.random.normal(loc=0, scale=5e-3)	# 测距噪声, 0均值, 测量标准差为5e-3 km
-		v_dk = np.random.multivariate_normal(mean=[0,0,0], cov=radians(10/3600)*np.identity(3))	# 测角噪声, 0均值, 协方差为 10角秒*I
+		v_rk = np.random.normal(loc=0, scale=Rk[0][0])	# 测距噪声, 0均值, 测量标准差为5e-3 km
+		v_dk = np.random.multivariate_normal(mean=[0,0,0], cov=Rk[1][1]*np.identity(3))	# 测角噪声, 0均值, 协方差为 10角秒*I
 		Z = [ r_norm + v_rk];   Z.extend(delta_r/r_norm + v_dk)
 		return np.array(Z)	# np.array, (4, )
 		
@@ -126,11 +128,10 @@ class Navigation(Orbit):
 		P0 = np.diag([ 3e-1, 3e-1, 3e-1, 1e-6, 1e-6, 1e-6, 3e-1, 3e-1, 3e-1, 1e-6, 1e-6, 1e-6 ])
 		error = np.random.multivariate_normal(mean=np.zeros(12), cov=P0)
 		X0 = np.hstack( (HPOP_1[0], HPOP_2[0]) ) + error
-		Rk =  np.diag( [1e-3, radians(10/3600), radians(10/3600), radians(10/3600)] )	# 4*4, sigma_r*I
-		Qk = np.diag([ 1e-4, 1e-4, 1e-4, 1e-8, 1e-8, 1e-8, 1e-4, 1e-4, 1e-4, 1e-8, 1e-8, 1e-8 ]) / 1e-2	# 12*12
-		points = MerweScaledSigmaPoints(n=12, alpha=0.001, beta=2.0, kappa=-9)
+		points = MerweScaledSigmaPoints(n=12, alpha=0.0001, beta=2.0, kappa=-9)
 		ukf = UKF(dim_x=12, dim_z=4, fx=self.state_equation, hx=self.measure_equation, dt=STEP, points=points)
 		ukf.x = X0; ukf.P = P0; ukf.R = Rk; ukf.Q = Qk; XF, XP = [X0], [X0]
+		print(error, "\n", Qk[0][0], "\n", Rk[0][0])
 		for i in range(1, number+1):
 			ukf.predict()
 			Z = nav.measure_stk(i)
@@ -158,12 +159,14 @@ if __name__ == "__main__":
 	import cProfile, pstats
 	ob = Orbit()
 	nav = Navigation()
-	number = 720
+	number = 360
 	
 	t, r1, r2 = 0, HPOP_1[0, :3], HPOP_2[0, :3]
 	HPOP = np.hstack((HPOP_1[:number], HPOP_2[:number]))
 	X = [ HPOP[0] ]
 	X0 = np.hstack( (HPOP_1[0], HPOP_2[0]) )
+	X1 = nav.state_equation(X0, dt=STEP); New_X1 = [ X1[i:i+3] for i in range(4) ]
+	X = np.hstack( (HPOP_1[1], HPOP_2[1]) ); New_X = [ X[i:i+3] for i in range(4) ]
 	X = nav.unscented_kf(number)
 	nav.plot_filter(X, number)
-	delta_x = np.array([ 9.76e2, 7.56e2, 9.03e2, 9.82e-1, 1.02, 8.95e-1, 9.48e2, 1.05e3, 1.06e3, 1.06, 8.51e-1, 8.92e-1 ])
+	
