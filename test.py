@@ -28,8 +28,8 @@ class Test_Orbit(Orbit):
 		rv_0 = HPOP[:, 0]; time_range = np.arange(0, number*120/3600, 120/3600)
 		print(rv_0)
 		# TwoBody = self.integrate_twobody(rv_0, number)
-		orbit = self.integrate_J2(rv_0, number)
-		# orbit = self.integrate_orbit(rv_0, number)
+		# orbit = self.integrate_J2(rv_0, number)
+		orbit = self.integrate_orbit(rv_0, number)
 		delta_1 = HPOP - TwoBody
 		delta_2 = orbit - TwoBody
 		delta_3 = HPOP - orbit

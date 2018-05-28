@@ -141,16 +141,13 @@ class Orbit:
 		
 	def nonspher_J2(self, r_sat, tdb_jd, miu=MIU_M, Re=RM):
 		'''计算J2项的摄动引力加速度'''
-		I2F = self.moon_Cbi(tdb_jd)	# 月惯系到月固系的方向余弦矩阵 3*3
-		r_fixed = np.dot(I2F, r_sat)		# 应该在固连系下建立，王正涛
-		J2 = C[2][0]; x, y, z = r_fixed
+		J2 = C[2][0]; x, y, z = r_sat
 		r_norm = np.linalg.norm(r_sat, 2)
 		pow_r2, pow_r3 = pow(r_norm, 2), pow(r_norm, 3)
 		fx = -miu*x/pow_r3 * J2 * pow((Re/r_norm), 2) * (7.5*pow(z,2)/pow_r2 - 1.5)
 		fy = -miu*y/pow_r3 * J2 * pow((Re/r_norm), 2) * (7.5*pow(z,2)/pow_r2 - 1.5)
 		fz = -miu*z/pow_r3 * J2 * pow((Re/r_norm), 2) * (7.5*pow(z,2)/pow_r2 - 4.5)
-		J2_fixed = np.array([ fx, fy, fz ])
-		J2_inertial = np.dot( I2F.T, J2_fixed )
+		J2_inertial = np.array([ fx, fy, fz ])
 		return J2_inertial
 		
 

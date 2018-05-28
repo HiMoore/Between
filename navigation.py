@@ -15,8 +15,16 @@ from filterpy.kalman import UnscentedKalmanFilter as UKF
 HPOP_1 = np.load("STK/HPOP_1.npy")	# r, v
 HPOP_2 = np.load("STK/HPOP_2.npy")	# r, v
 Time = 0
-Qk = np.diag([ 1e-8, 1e-8, 1e-8, 1e-12, 1e-12, 1e-12, 1e-8, 1e-8, 1e-8, 1e-12, 1e-12, 1e-12 ]) * 1e-0	# 12*12
+Qk = np.diag([ 1e-8, 1e-8, 1e-8, 1e-12, 1e-12, 1e-12, 1e-8, 1e-8, 1e-8, 1e-12, 1e-12, 1e-12 ]) * 1e-1	# 12*12
 Rk = np.power( np.diag( [1e-3, radians(10/3600), radians(10/3600), radians(10/3600)] ), 2 )	# 4*4, sigma_r*I
+
+
+import matplotlib as mpl
+mpl.rcParams['font.sans-serif'] = ['NSimSun', 'Times New Roman'] # 指定默认字体
+mpl.rcParams['font.family']='sans-serif'
+mpl.rcParams['lines.linewidth'] = 3
+mpl.rcParams['axes.unicode_minus'] = False # 解决保存图像是负号'-'显示为方块的问题
+mpl.rcParams["figure.figsize"] = (15, 9)
 
 
 class Navigation(Orbit):
@@ -89,10 +97,21 @@ class Navigation(Orbit):
 		
 	def plot_filter(self, X, number):
 		r1, r2 = X[:number, :3], X[:number, 6:9]
-		plt.figure(1, figsize=(15,9))
-		plt.plot(range(number), r1[:number] - HPOP_1[:number, :3])
-		plt.figure(2, figsize=(15,9))
-		plt.plot(range(number), r2[:number] - HPOP_2[:number, :3])
+		time_range = np.arange(0, number*120/3600, 120/3600)
+		plt.figure(1)
+		plt.xlabel("时间 / $\mathrm{h}$", fontsize=28); plt.ylabel("位置误差 / ($\mathrm{km}$)", fontsize=28)
+		plt.xticks(fontsize=24); plt.yticks(fontsize=24)
+		plt.plot(time_range, r1[:number, 0] - HPOP_1[:number, 0], "r-", label="x")
+		plt.plot(time_range, r1[:number, 1] - HPOP_1[:number, 1], "b--", label="y")
+		plt.plot(time_range, r1[:number, 2] - HPOP_1[:number, 2], "g-.", label="z")
+		plt.legend(fontsize=24)
+		
+		plt.figure(2)
+		plt.plot(time_range, r2[:number, 0] - HPOP_2[:number, 0], "r-", label="x")
+		plt.plot(time_range, r2[:number, 1] - HPOP_2[:number, 1], "b--", label="y")
+		plt.plot(time_range, r2[:number, 2] - HPOP_2[:number, 2], "g-.", label="z")
+		plt.legend(fontsize=24)
+		
 		plt.show()
 		
 		
@@ -128,7 +147,7 @@ class Navigation(Orbit):
 		P0 = np.diag([ 3e-1, 3e-1, 3e-1, 1e-6, 1e-6, 1e-6, 3e-1, 3e-1, 3e-1, 1e-6, 1e-6, 1e-6 ])
 		error = np.random.multivariate_normal(mean=np.zeros(12), cov=P0)
 		X0 = np.hstack( (HPOP_1[0], HPOP_2[0]) ) + error
-		points = MerweScaledSigmaPoints(n=12, alpha=0.0001, beta=2.0, kappa=-9)
+		points = MerweScaledSigmaPoints(n=12, alpha=0.001, beta=2.0, kappa=-9)
 		ukf = UKF(dim_x=12, dim_z=4, fx=self.state_equation, hx=self.measure_equation, dt=STEP, points=points)
 		ukf.x = X0; ukf.P = P0; ukf.R = Rk; ukf.Q = Qk; XF, XP = [X0], [X0]
 		print(error, "\n", Qk[0][0], "\n", Rk[0][0])
@@ -141,7 +160,7 @@ class Navigation(Orbit):
 		XF = np.array(XF)
 		return XF
 		
-	@fn_timer	# 163s, 误差3km
+	@fn_timer	# 运行时间163s, 误差3km
 	def error_stateEq_ukf(self, number):
 		error = np.array([ 0.1, 0.1, 0.1, 1e-3, 1e-3, 1e-3, 0.1, 0.1, 0.1, 1e-3, 1e-3, 1e-3 ])
 		X0 = np.hstack( (HPOP_1[0], HPOP_2[0]) )
@@ -159,7 +178,7 @@ if __name__ == "__main__":
 	import cProfile, pstats
 	ob = Orbit()
 	nav = Navigation()
-	number = 360
+	number = 720 * 2
 	
 	t, r1, r2 = 0, HPOP_1[0, :3], HPOP_2[0, :3]
 	HPOP = np.hstack((HPOP_1[:number], HPOP_2[:number]))
