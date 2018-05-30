@@ -10,21 +10,28 @@ from functools import partial
 from orbit_km import *
 from filterpy.kalman import unscented_transform, MerweScaledSigmaPoints
 from filterpy.kalman import UnscentedKalmanFilter as UKF
+from filterpy.kalman import ExtendedKalmanFilter as EKF
 
 
-HPOP_1 = np.load("STK/HPOP_1.npy")	# r, v
-HPOP_2 = np.load("STK/HPOP_2.npy")	# r, v
-Time = 0
-Qk = np.diag([ 1e-8, 1e-8, 1e-8, 1e-12, 1e-12, 1e-12, 1e-8, 1e-8, 1e-8, 1e-12, 1e-12, 1e-12 ]) * 1e-1	# 12*12
+Time, NUMBER = 0, 1440
+Qk = np.diag([ 1e-10, 1e-10, 1e-10, 1e-14, 1e-14, 1e-14, 1e-10, 1e-10, 1e-10, 1e-14, 1e-14, 1e-14 ])	# 12*12
 Rk = np.power( np.diag( [1e-3, radians(10/3600), radians(10/3600), radians(10/3600)] ), 2 )	# 4*4, sigma_r*I
+# 基础卫星数据，轨道倾角分别为0和28.5°
+basic_i0A = ( pd.read_csv("STK/basic/Sat_1_i0.csv", nrows=NUMBER, usecols=range(1,7)) ).values
+basic_i0B = ( pd.read_csv("STK/basic/Sat_2_i0.csv", nrows=NUMBER, usecols=range(1,7)) ).values
+basic_i28A = ( pd.read_csv("STK/basic/Sat_1_i28.csv", nrows=NUMBER, usecols=range(1,7)) ).values
+basic_i28B = ( pd.read_csv("STK/basic/Sat_2_i28.csv", nrows=NUMBER, usecols=range(1,7)) ).values
+# 赋值HPOP_1, HPOP_2
+HPOP_1, HPOP_2 = basic_i0A, basic_i0B
 
 
 import matplotlib as mpl
 mpl.rcParams['font.sans-serif'] = ['NSimSun', 'Times New Roman'] # 指定默认字体
 mpl.rcParams['font.family']='sans-serif'
-mpl.rcParams['lines.linewidth'] = 3
 mpl.rcParams['axes.unicode_minus'] = False # 解决保存图像是负号'-'显示为方块的问题
-mpl.rcParams["figure.figsize"] = (15, 9)
+mpl.rcParams["figure.figsize"] = (15, 9); mpl.rcParams['lines.linewidth'] = 4
+mpl.rcParams['legend.fontsize'] = 30; mpl.rcParams['axes.labelsize'] = 30;
+mpl.rcParams['xtick.labelsize'] = 30;mpl.rcParams['ytick.labelsize'] = 30
 
 
 class Navigation(Orbit):
@@ -44,16 +51,26 @@ class Navigation(Orbit):
 		A2 = coo_matrix( self.coefMatrix_single(r2, tdb_jd) )	 # 6*6
 		Ft = block_diag((A1, A2), format="bsr")
 		Phi_144 = (Ft * Phi).toarray().reshape(144, order="F")
-		return Phi_144 	# 144*1, np.array
-		
+		return Phi_144 	# 144*1, ndarray
+
 		
 	def jacobian_double(self, t, r1, r2):
 		'''计算双星系统的状态转移矩阵(Jacobian矩阵), 使用RK45完成数值积分, 12*12'''
 		Phi_0 = (np.identity(12)).reshape(144, order="F")		# 144*1, ndarray, 按列展开
 		solution = solve_ivp( partial(self.coefMatrix_double, r1=r1, r2=r2), (t, t+STEP), Phi_0, method="RK45", \
 					rtol=1e-9, atol=1e-9, t_eval=[t+STEP] )
-		ode_y = (solution.y).reshape(12, 12, order="F")
-		return bsr_matrix(ode_y, blocksize=(6,6))	# 12*12, sparse (half zero)
+		PHI = (solution.y).reshape(12, 12, order="F")
+		return PHI	# 12*12, ndarray
+		
+		
+	def jacobian_approx(self, t, r1, r2):
+		'''计算双星系统的状态转移矩阵(Jacobian矩阵), 使用RK45完成数值积分, 12*12'''
+		tdb_jd = (time_utc+int(t)).to_julian_date() + 69.184/86400
+		F1 = coo_matrix( self.coefMatrix_single(r1, tdb_jd) )	 # 6*6
+		F2 = coo_matrix( self.coefMatrix_single(r2, tdb_jd) )	 # 6*6
+		Ft = block_diag((F1, F2), format="bsr")
+		PHI = identity(12) + Ft*STEP# + 0.5*Ft.power(2)*pow(STEP, 2)
+		return PHI	# 12*12, ndarray
 		
 
 	def jacobian_measure(self, r1, r2):
@@ -68,52 +85,20 @@ class Navigation(Orbit):
 		dh2_dr1, dh2_dr2 = np.hstack((h2_r1, zeros)), np.hstack((h2_r2, zeros))	# 3*6, 3*6
 		low = np.hstack((dh2_dr1, dh2_dr2))	 # 3*12
 		H = np.vstack((up, low))	# 4*12
-		return bsr_matrix(H, blocksize=(1, 3))	# 4*12, sparse (half zero)
+		return H	# 4*12, ndarray
 		
 	
 	def extend_kf(self, number=240):
 		'''扩展卡尔曼滤波算法, 初步看滤波效果'''
-		X0 = np.hstack( (HPOP_1[0], HPOP_2[0]) )
-		P0 = identity(12)
+		global Time
+		P0 = np.diag([ 3e-1, 3e-1, 3e-1, 1e-6, 1e-6, 1e-6, 3e-1, 3e-1, 3e-1, 1e-6, 1e-6, 1e-6 ])
+		error = np.random.multivariate_normal(mean=np.zeros(12), cov=P0)
+		X0 = np.hstack( (HPOP_1[0], HPOP_2[0]) ) + error
 		X, P, I = [X0], [P0], identity(12)
-		Rk =  diags([1e-3, 10/3600, 10/3600, 10/3600], format="dia")		# 4*4, sparse
-		Qk = diags(np.repeat(1, 12), format="dia")		# 12*12, sparse
-		for i in range(1, number):
-			r1, r2 = X[i-1][:3], X[i-1][6:9]
-			Phi = nav.jacobian_double(STEP*(i-1), r1, r2)	# 12*12, sparse
-			Zk = nav.measure_equation(i-1)	# (4, ), ndarray
-			Hk = nav.jacobian_measure(r1, r2)	# 4*12, sparse
-			Xk_pre = Phi * X[i-1]	# (12, )
-			Pk_pre = Phi * P[i-1] * Phi.T  + Qk	# 12*12, sparse (half zero)
-			print("Phi :", Phi, "\n\n", "HK :", Hk, "\n\n", "Pk_pre :", Pk_pre)
-			Sk = (Hk*Pk_pre*Hk.T + Rk).toarray()	# 4*4, ndarray
-			print("Sk :", Sk.shape, "\n", Sk)
-			Kk = Pk_pre*Hk.T * np.linalg.inv( Sk )	# 12*4, ndarray
-			Xk_upd = X[i-1] + Kk.dot( (Zk - Hk*Xk_pre) )
-			print("Kk :", Kk, "\n\n", "Xk_upd: ", Xk_upd)
-			Pk_upd = (I - Kk*Hk) * Pk_pre * (I - Kk*Hk).T + (Kk*Rk).dot(Kk.T)
-			X.append(Xk_upd); P.append(Pk_upd)
+		ekf = EKF(dix_x=12, dim_z=4, compute_log_likelihood=False)
+		ekf.x = X0; ekf.F = self.jacobian_double(Time, )
 
-		
-	def plot_filter(self, X, number):
-		r1, r2 = X[:number, :3], X[:number, 6:9]
-		time_range = np.arange(0, number*120/3600, 120/3600)
-		plt.figure(1)
-		plt.xlabel("时间 / $\mathrm{h}$", fontsize=28); plt.ylabel("位置误差 / ($\mathrm{km}$)", fontsize=28)
-		plt.xticks(fontsize=24); plt.yticks(fontsize=24)
-		plt.plot(time_range, r1[:number, 0] - HPOP_1[:number, 0], "r-", label="x")
-		plt.plot(time_range, r1[:number, 1] - HPOP_1[:number, 1], "b--", label="y")
-		plt.plot(time_range, r1[:number, 2] - HPOP_1[:number, 2], "g-.", label="z")
-		plt.legend(fontsize=24)
-		
-		plt.figure(2)
-		plt.plot(time_range, r2[:number, 0] - HPOP_2[:number, 0], "r-", label="x")
-		plt.plot(time_range, r2[:number, 1] - HPOP_2[:number, 1], "b--", label="y")
-		plt.plot(time_range, r2[:number, 2] - HPOP_2[:number, 2], "g-.", label="z")
-		plt.legend(fontsize=24)
-		
-		plt.show()
-		
+#############################################################################################################
 		
 	def measure_stk(self, i):
 		'''双星系统的测量方程的实际测量输出 Zk = h(Xk) + Vk, 由STK生成并加入噪声, ndarray'''
@@ -144,8 +129,8 @@ class Navigation(Orbit):
 	
 	def unscented_kf(self, number=number):
 		global Time
-		P0 = np.diag([ 3e-1, 3e-1, 3e-1, 1e-6, 1e-6, 1e-6, 3e-1, 3e-1, 3e-1, 1e-6, 1e-6, 1e-6 ])
-		error = np.random.multivariate_normal(mean=np.zeros(12), cov=P0)
+		P0 = np.diag([ 9e-2, 9e-2, 9e-2, 9e-6, 9e-6, 9e-6, 9e-2, 9e-2, 9e-2, 9e-6, 9e-6, 9e-6 ])
+		error = np.array([ 0.3, 0.3, 0.3, 3e-1, 3e-1, 3e-1, 0.3, 0.3, 0.3, 3e-1, 3e-1, 3e-1 ]) # np.random.multivariate_normal(mean=np.zeros(12), cov=P0)
 		X0 = np.hstack( (HPOP_1[0], HPOP_2[0]) ) + error
 		points = MerweScaledSigmaPoints(n=12, alpha=0.001, beta=2.0, kappa=-9)
 		ukf = UKF(dim_x=12, dim_z=4, fx=self.state_equation, hx=self.measure_equation, dt=STEP, points=points)
@@ -160,32 +145,60 @@ class Navigation(Orbit):
 		XF = np.array(XF)
 		return XF
 		
-	@fn_timer	# 运行时间163s, 误差3km
-	def error_stateEq_ukf(self, number):
-		error = np.array([ 0.1, 0.1, 0.1, 1e-3, 1e-3, 1e-3, 0.1, 0.1, 0.1, 1e-3, 1e-3, 1e-3 ])
-		X0 = np.hstack( (HPOP_1[0], HPOP_2[0]) )
-		X, D = [ X0 ], []
-		for i in range(1, number):
-			New_X = self.state_equation(X[i-1])
-			X.append(New_X)
-		X = np.array(X)
-		return X
 
+	def plot_filter(self, X, number):
+		X1, X2 = X[:number, :6], X[:number, 6:]
+		time_range = np.arange(0, number*120/3600, 120/3600)
+		up_error = 50 + 1e3 * np.power(e, -time_range)
+		low_error = -50 - 1e3 * np.power(e, -time_range)
+		plt.figure(1)
+		plt.xlabel("时间 / $\mathrm{h}$", fontsize=28); plt.ylabel("位置误差 / ($\mathrm{m}$)", fontsize=28)
+		plt.xticks(fontsize=24); plt.yticks(fontsize=24)
+		plt.plot(time_range, (X1[:number, 0] - HPOP_1[:number, 0]) * 1000, "r-", label="x")
+		plt.plot(time_range, (X1[:number, 1] - HPOP_1[:number, 1]) * 1000, "b--", label="y")
+		plt.plot(time_range, (X1[:number, 2] - HPOP_1[:number, 2]) * 1000, "g-.", label="z")
+		plt.plot(time_range, up_error, "k:")
+		plt.plot(time_range, low_error, "k:", label=" $\mathrm{\pm 50 m}$")
+		plt.legend(fontsize=24)
 		
+		plt.figure(2)
+		plt.xlabel("时间 / $\mathrm{h}$", fontsize=28); plt.ylabel("速度误差 / ($\mathrm{m/s}$)", fontsize=28)
+		plt.xticks(fontsize=24); plt.yticks(fontsize=24)
+		plt.plot(time_range, (X1[:number, 3] - HPOP_1[:number, 3]) * 1000, "r-", label="x")
+		plt.plot(time_range, (X1[:number, 4] - HPOP_1[:number, 4]) * 1000, "b--", label="y")
+		plt.plot(time_range, (X1[:number, 5] - HPOP_1[:number, 5]) * 1000, "g-.", label="z")
+		plt.legend(fontsize=24)
+
+		plt.figure(3)
+		plt.xlabel("时间 / $\mathrm{h}$", fontsize=28); plt.ylabel("位置误差 / ($\mathrm{m}$)", fontsize=28)
+		plt.xticks(fontsize=24); plt.yticks(fontsize=24)
+		plt.plot(time_range, (X2[:number, 0] - HPOP_2[:number, 0]) * 1000, "r-", label="x")
+		plt.plot(time_range, (X2[:number, 1] - HPOP_2[:number, 1]) * 1000, "b--", label="y")
+		plt.plot(time_range, (X2[:number, 2] - HPOP_2[:number, 2]) * 1000, "g-.", label="z")
+		plt.plot(time_range, up_error, "k:")
+		plt.plot(time_range, low_error, "k:", label=" $\mathrm{\pm 50 m}$")
+		plt.legend(fontsize=24)
+		
+		plt.figure(4)
+		plt.xlabel("时间 / $\mathrm{h}$", fontsize=28); plt.ylabel("速度误差 / ($\mathrm{m/s}$)", fontsize=28)
+		plt.xticks(fontsize=24); plt.yticks(fontsize=24)
+		plt.plot(time_range, (X2[:number, 3] - HPOP_1[:number, 3]) * 1000, "r-", label="x")
+		plt.plot(time_range, (X2[:number, 4] - HPOP_1[:number, 4]) * 1000, "b--", label="y")
+		plt.plot(time_range, (X2[:number, 5] - HPOP_1[:number, 5]) * 1000, "g-.", label="z")
+		plt.legend(fontsize=24)
+
+		plt.show()
 		
 		
 if __name__ == "__main__":
 	import cProfile, pstats
 	ob = Orbit()
 	nav = Navigation()
-	number = 720 * 2
+	number = 720
 	
-	t, r1, r2 = 0, HPOP_1[0, :3], HPOP_2[0, :3]
-	HPOP = np.hstack((HPOP_1[:number], HPOP_2[:number]))
-	X = [ HPOP[0] ]
-	X0 = np.hstack( (HPOP_1[0], HPOP_2[0]) )
-	X1 = nav.state_equation(X0, dt=STEP); New_X1 = [ X1[i:i+3] for i in range(4) ]
-	X = np.hstack( (HPOP_1[1], HPOP_2[1]) ); New_X = [ X[i:i+3] for i in range(4) ]
+	# # X = nav.extend_kf(number)
 	X = nav.unscented_kf(number)
+	np.save("npy/error_300m.npy", X)
+	# # X = np.load("npy/basic_x.npy")
 	nav.plot_filter(X, number)
 	

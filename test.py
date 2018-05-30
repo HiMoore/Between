@@ -11,10 +11,10 @@ from orbit_km import *
 import matplotlib as mpl
 mpl.rcParams['font.sans-serif'] = ['NSimSun', 'Times New Roman'] # 指定默认字体
 mpl.rcParams['font.family']='sans-serif'
-# mpl.rcParams['mathtext.fontset'] = 'custom'
-mpl.rcParams['lines.linewidth'] = 3
 mpl.rcParams['axes.unicode_minus'] = False # 解决保存图像是负号'-'显示为方块的问题
-mpl.rcParams["figure.figsize"] = (15, 9)
+mpl.rcParams["figure.figsize"] = (15, 9); mpl.rcParams['lines.linewidth'] = 4
+mpl.rcParams['legend.fontsize'] = 30; mpl.rcParams['axes.labelsize'] = 30;
+mpl.rcParams['xtick.labelsize'] = 30;mpl.rcParams['ytick.labelsize'] = 30
 
 class Test_Orbit(Orbit):
 
@@ -28,38 +28,34 @@ class Test_Orbit(Orbit):
 		rv_0 = HPOP[:, 0]; time_range = np.arange(0, number*120/3600, 120/3600)
 		print(rv_0)
 		# TwoBody = self.integrate_twobody(rv_0, number)
-		# orbit = self.integrate_J2(rv_0, number)
-		orbit = self.integrate_orbit(rv_0, number)
+		orbit = self.integrate_J2(rv_0, number)
+		# orbit = self.integrate_orbit(rv_0, number)
 		delta_1 = HPOP - TwoBody
 		delta_2 = orbit - TwoBody
 		delta_3 = HPOP - orbit
 		
-		plt.figure(1, figsize=(15,9))
-		plt.xlabel("时间 / $\mathrm{h}$", fontsize=28); plt.ylabel("位置误差 / ($\mathrm{km}$)", fontsize=28)
-		plt.xticks(fontsize=24); plt.yticks(fontsize=24)
+		plt.figure(1)
+		plt.xlabel("时间 / $\mathrm{h}$"); plt.ylabel("位置误差 / ($\mathrm{km}$)")
 		plt.plot(time_range, delta_1[0], "r-", label="x")
 		plt.plot(time_range, delta_1[1], "b--", label="y")
 		plt.plot(time_range, delta_1[2], "g-.", label="z")
-		plt.legend(fontsize=24)
+		plt.legend()
 		
-		# plt.figure(2, figsize=(15,9))
-		# plt.xlabel("时间 / $\mathrm{h}$", fontsize=28); plt.ylabel("位置误差 / ($\mathrm{km}$)", fontsize=28)
-		# plt.xticks(fontsize=24); plt.yticks(fontsize=24)
+		# plt.figure(2)
+		# plt.xlabel("时间 / $\mathrm{h}$"); plt.ylabel("位置误差 / ($\mathrm{km}$)")
 		# plt.plot(time_range, delta_2[0], "r-", label="x")
 		# plt.plot(time_range, delta_2[1], "b--", label="y")
 		# plt.plot(time_range, delta_2[2], "g-.", label="z")
-		# plt.legend(fontsize=24)
+		# plt.legend()
 		
-		plt.figure(3, figsize=(15,9))
-		plt.xlabel("时间 / $\mathrm{h}$", fontsize=28); plt.ylabel("位置误差 / ($\mathrm{km}$)", fontsize=28)
-		plt.xticks(fontsize=24); plt.yticks(fontsize=24)
+		plt.figure(3)
+		plt.xlabel("时间 / $\mathrm{h}$"); plt.ylabel("位置误差 / ($\mathrm{km}$)")
 		plt.plot(time_range, delta_3[0], "r-", label="x")
 		plt.plot(time_range, delta_3[1], "b--", label="y")
 		plt.plot(time_range, delta_3[2], "g-.", label="z")
-		plt.legend(fontsize=24)
+		plt.legend()
 		
 		# fig = plt.figure(1)
-		# plt.xticks(fontsize=24); plt.yticks(fontsize=24)
 		# ax = Axes3D(fig)
 		# ax.plot(HPOP[0], HPOP[1], HPOP[2], antialiased=True)
 		# ax.scatter(0, 0, 0, marker="x", s=500, c='r')
@@ -88,44 +84,38 @@ class Test_Orbit(Orbit):
 		a_solar = np.array([ np.linalg.norm(orb.solarPress(r_sat, tdb_jd)) for (r_sat, tdb_jd) in zip(r_array, tdbJD_list) ]) * 1000
 		time_range = np.arange(0, number*step/9000, step/9000)
 		
-		plt.figure(1, figsize=(15,9))
-		plt.xlabel("轨道数量 / 个", fontsize=28); plt.ylabel(r"加速度 / $(\mathrm{m/s^2})$", fontsize=28)
-		plt.xticks(fontsize=24); plt.yticks(fontsize=24)
-		plt.plot(time_range, a0, "r-", label="中心天体引力加速度")
-		a = a0+a1+a_sun+a_earth+a_solar
-		plt.plot(time_range, a, "g-", label="完整摄动加速度")
-		plt.legend(fontsize=24, loc=1); 
+		# plt.figure(1, figsize=(15,9))
+		# plt.xlabel("轨道数量 / 个"); plt.ylabel(r"加速度 / $(\mathrm{m/s^2})$")
+		# plt.plot(time_range, a0, "r-", label="中心天体引力加速度")
+		# a = a0+a1+a_sun+a_earth+a_solar
+		# plt.plot(time_range, a, "g-", label="完整摄动加速度")
+		# plt.legend(); 
 		
 		# plt.figure(2, figsize=(15,9))
-		# plt.xlabel("轨道数量 / 个", fontsize=28); plt.ylabel(r"加速度 / $(\mathrm{m/s^2})$", fontsize=28)
-		# plt.xticks(fontsize=24); plt.yticks(fontsize=24)
+		# plt.xlabel("轨道数量 / 个"); plt.ylabel(r"加速度 / $(\mathrm{m/s^2})$")
 		# plt.plot(time_range, a1, "r-", label="非球形引力摄动加速度")
 		# plt.plot(time_range, a_earth, "b--", label="地球引力摄动加速度")
 		# plt.plot(time_range, a_sun, "g-.", label="太阳引力摄动加速度")
 		# plt.plot(time_range, a_solar, "y:", label="太阳光压摄动加速度")
-		# plt.legend(fontsize=24, loc=1)
+		# plt.legend()
 		
 		# plt.figure(3, figsize=(15,9))
-		# plt.xlabel("轨道数量 / 个", fontsize=28); plt.ylabel(r"加速度 / $(\mathrm{m/s^2})$", fontsize=28)
-		# plt.xticks(fontsize=24); plt.yticks(fontsize=24)
+		# plt.xlabel("轨道数量 / 个"); plt.ylabel(r"加速度 / $(\mathrm{m/s^2})$")
 		# plt.plot(time_range, a1, "r-", label="非球形引力摄动加速度")
 		# plt.plot(time_range, a_earth, "b--", label="地球三体引力摄动加速度")
-		# plt.legend(fontsize=24, loc=1)
+		# plt.legend()
 		
 		# plt.figure(4, figsize=(15,9))
-		# plt.xlabel("轨道数量 / 个", fontsize=28); plt.ylabel(r"加速度 / $(\mathrm{m/s^2})$", fontsize=28)
-		# plt.xticks(fontsize=24); plt.yticks(fontsize=24)
+		# plt.xlabel("轨道数量 / 个"); plt.ylabel(r"加速度 / $(\mathrm{m/s^2})$")
 		# plt.plot(time_range, a_sun, "g-", label="太阳三体引力摄动加速度")
 		# plt.plot(time_range, a_solar, "y--", label="太阳光压摄动加速度")
-		# plt.legend(fontsize=24, loc=1); 
+		# plt.legend(); 
 		
-		# plt.figure(5, figsize=(15,9))
-		# plt.xlabel("轨道数量 / 个", fontsize=28); plt.ylabel(r"加速度 / $(\mathrm{m/s^2})$", fontsize=28)
-		# plt.xticks(fontsize=24); plt.yticks(fontsize=24)
-		# plt.plot(time_range, a1, "r-", label="非球形引力摄动加速度")
-		# plt.plot(time_range, a_J2, "b--", label="J2项摄动加速度")
-		# plt.legend(fontsize=24, loc=1); 
-		
+		plt.figure(5)
+		plt.xlabel("轨道数量 / 个"); plt.ylabel(r"加速度 / $(\mathrm{m/s^2})$")
+		plt.plot(time_range, a1, "r-", label="非球形引力摄动加速度")
+		plt.plot(time_range, a_J2, "b--", label="J2项摄动加速度")
+		plt.legend(); 
 		plt.show()
 		
 

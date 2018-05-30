@@ -61,7 +61,7 @@ class Orbit:
 	def __del__(self):
 		return	
 		
-	def readCoffients(self, number=496, n=30):
+	def readCoffients(self, number=3321, n=80):
 		'''获取中心天体球谐引力系数，默认前30阶，包括0阶项, np.array'''
 		df = pd.read_csv("STK/GL0660B.grv", sep="\s+", header=None, nrows=number)
 		f = df[:number]
@@ -139,7 +139,7 @@ class Orbit:
 		return g0	# km/s^2
 		
 		
-	def nonspher_J2(self, r_sat, tdb_jd, miu=MIU_M, Re=RM):
+	def nonspher_J2(self, r_sat, miu=MIU_M, Re=RM):
 		'''计算J2项的摄动引力加速度'''
 		J2 = C[2][0]; x, y, z = r_sat
 		r_norm = np.linalg.norm(r_sat, 2)
@@ -233,7 +233,7 @@ class Orbit:
 		tdb_jd = (time_utc+int(t)).to_julian_date() + 69.184/86400
 		R, V = RV[:3], (RV[3:]).tolist()	# km, km/s
 		F0 = self.centreGravity(R, miu)
-		F1 = self.nonspher_J2(R, tdb_jd, miu, Re) 
+		F1 = self.nonspher_J2(R, miu, Re) 
 		F = F0 + F1		# km/s^2
 		V.extend(F)
 		return np.array(V)		# km/s, km/s^2
@@ -252,7 +252,7 @@ class Orbit:
 		F3 = self.thirdSun(R, tdb_jd)
 		F = F0 + F1 + F2 + F3		# km/s^2
 		V.extend(F)
-		return np.array(V)		# km/s, km/s^2
+		return np.array(V)		# km/s, km/s^2	
 		
 		
 	def integrate_orbit(self, rv_0, num):
@@ -350,7 +350,7 @@ class Orbit:
 		earth_dadr = - MIU_E / pow(norm_earth, 3) * ( np.identity(3) - 3/pow(norm_earth, 2) * np.outer(l_earth, l_earth) )
 		sun_dadr = -MIU_S / pow(norm_sun, 3) * ( np.identity(3) - 3/pow(norm_sun, 2) * np.outer(l_sun, l_sun) )
 		return earth_dadr + sun_dadr
-		
+
 		
 	def coefMatrix_single(self, r_sat, tdb_jd):
 		'''单颗卫星构成的状态方程的Jaccobian矩阵计算公式中的系数矩阵项,  王正涛(eq 3-3-5)
@@ -367,6 +367,7 @@ class Orbit:
 if __name__ == "__main__":
 	
 	ob = Orbit()
+	# ob.readCoffients()
 	number = 10
 	data = pd.read_csv("STK/Part_2/1_Inertial_HPOP_660.csv", nrows=number, usecols=range(1, 7))	# 取前number个点进行试算
 	RV_array = data.values
@@ -377,10 +378,10 @@ if __name__ == "__main__":
 	tdbJD_list = [ time_utc.to_julian_date() + 69.184/86400 for time_utc in utc_array ]
 	r_sat, RV, time_utc = r_array[0], RV_array[0], utc_array[0]
 	utc_jd, tdb_jd = time_utc.to_julian_date(), time_utc.to_julian_date() + 69.184/86400
-	print(utc_jd)
-	da_2 = np.array([ ob.nonspher_moon(r_sat, tdb_jd) for (r_sat, tdb_jd) in zip(r_array, tdbJD_list) ])
-	da_3 = [ ob.thirdEarth(r_sat, time_tdb) for r_sat, time_tdb in zip(r_array, tdbJD_list) ]
-	print(da_2[:5], "\n\n", da_3[:5])
 	X0 = np.array([ 1.84032000e+03,  0.00000000e+00,  0.00000000e+00, -0.00000000e+00, 1.57132000e+00,  8.53157000e-01])
-	# ode_y = ob.integrate_orbit(X0, number)
+	# print(ob.coefMatrix_single(r_sat, tdb_jd))
+	
+	centre_1 = np.array([ ob.partial_third(r_sat, tdb_jd) for r_sat, tdb_jd in zip(r_array[:10], tdbJD_list[:10]) ])
+	centre_2 = np.array([ ob.partial_third_1(r_sat, tdb_jd) for r_sat, tdb_jd in zip(r_array[:10], tdbJD_list[:10]) ])
+	centre_3 = np.array([ ob.partial_third_2(r_sat, tdb_jd) for r_sat, tdb_jd in zip(r_array[:10], tdbJD_list[:10]) ])
 	
