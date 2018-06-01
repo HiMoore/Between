@@ -25,7 +25,7 @@ basic_i28B = ( pd.read_csv("STK/basic/Sat_2_i28.csv", nrows=NUMBER, usecols=rang
 old_A = ( pd.read_csv("STK/Part_2/1_Inertial_HPOP_660.csv", nrows=NUMBER, usecols=range(1,7)) ).values
 old_B = ( pd.read_csv("STK/Part_2/2_Inertial_HPOP_660.csv", nrows=NUMBER, usecols=range(1,7)) ).values
 # 赋值HPOP_1, HPOP_2
-HPOP_1, HPOP_2 = basic_i28A, basic_i28B
+HPOP_1, HPOP_2 = basic_i0A, basic_i28B
 
 
 import matplotlib as mpl
@@ -134,7 +134,7 @@ class Navigation(Orbit):
 		global Time
 		P0 = np.diag([ 3e-2, 3e-2, 3e-2, 3e-6, 3e-6, 3e-6, 3e-2, 3e-2, 3e-2, 3e-6, 3e-6, 3e-6 ])
 		P1 = np.diag([ 3e-2, 3e-2, 3e-2, 3e-6, 3e-6, 3e-6, 3e-2, 3e-2, 3e-2, 3e-6, 3e-6, 3e-6 ]) / 1e-2
-		error = np.random.multivariate_normal(mean=np.zeros(12), cov=P1)
+		error = np.random.multivariate_normal(mean=np.zeros(12), cov=P0)
 		X0 = np.hstack( (HPOP_1[0], HPOP_2[0]) ) + error
 		points = MerweScaledSigmaPoints(n=12, alpha=0.001, beta=2.0, kappa=-9)
 		ukf = UKF(dim_x=12, dim_z=4, fx=self.state_equation, hx=self.measure_equation, dt=STEP, points=points)
@@ -221,7 +221,7 @@ if __name__ == "__main__":
 	
 	# # X = nav.extend_kf(number)
 	X = nav.unscented_kf(number)
-	np.save("npy/i=28, P0=3e-2, P1=3e0.npy", X)
+	np.save("npy/ia=0, ib=28, P0=3e-2.npy", X)
 	# X = np.load("npy/basic_x_.npy")
 	nav.plot_filter(X, number)
 	

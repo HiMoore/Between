@@ -15,7 +15,7 @@ from scipy.integrate import solve_ivp
 # 恒定常值变量区
 MIU_E, MIU_M, MIU_S = 398600.4415, 4902.80030555540, 132712422595.6590		# 引力系数，单位 km^3 / s^2
 RE, RM, RS = 6378.1363, 1738.000, 69550.0		#天体半径，单位 km
-number, CSD_LM, STEP = 495, 30, 120	#全局积分步长
+number, CSD_LM, STEP = 495, 80, 120	#全局积分步长
 Beta = 0
 C, S = np.load("STK/Clm.npy"), np.load("STK/Slm.npy")	# 序列化后代码速度提高4倍
 
@@ -227,7 +227,7 @@ class Orbit:
 		
 		
 	def J2_dynamic(self, t, RV, miu=MIU_M, Re=RM, lm=CSD_LM):
-		'''系统完整动力学模型, 暂考虑中心引力，非球形引力，第三天体引力
+		'''只考虑J2项的动力学模型
 		输入：	时间t，从0开始（好像不太重要）; 	惯性系下位置速度	km, km/s, np.array
 		输出：	返回d(RV)/dt，动力学增量, np.array, 1*6, m/s, m/s^2'''
 		tdb_jd = (time_utc+int(t)).to_julian_date() + 69.184/86400
