@@ -13,29 +13,24 @@ from filterpy.kalman import UnscentedKalmanFilter as UKF
 from filterpy.kalman import ExtendedKalmanFilter as EKF
 
 
-Time, NUMBER = 0, 1440
+Time, NUMBER = 0, 722
 Qk = np.diag([ 1e-10, 1e-10, 1e-10, 1e-14, 1e-14, 1e-14, 1e-10, 1e-10, 1e-10, 1e-14, 1e-14, 1e-14 ])	# 12*12
-Rk = np.power( np.diag( [1e-3, radians(10/3600), radians(10/3600), radians(10/3600)] ), 2 )	# 4*4, sigma_r*I
+Rk = np.power( np.diag( [1e-3, radians(10/3600), radians(10/3600), radians(10/3600)] ), 2 ) * 1e-2	# 4*4, sigma_r*I
 # 基础卫星数据，轨道倾角分别为0和28.5°
-basic_i0A = ( pd.read_csv("STK/basic/Sat_1_i0.csv", nrows=NUMBER, usecols=range(1,7)) ).values
-basic_i0B = ( pd.read_csv("STK/basic/Sat_2_i0.csv", nrows=NUMBER, usecols=range(1,7)) ).values
 basic_i28A = ( pd.read_csv("STK/basic/Sat_1_i28.csv", nrows=NUMBER, usecols=range(1,7)) ).values
 basic_i28B = ( pd.read_csv("STK/basic/Sat_2_i28.csv", nrows=NUMBER, usecols=range(1,7)) ).values
-# 原来的卫星数据，偏心率相差0.01的两颗卫星
-old_A = ( pd.read_csv("STK/Part_2/1_Inertial_HPOP_660.csv", nrows=NUMBER, usecols=range(1,7)) ).values
-old_B = ( pd.read_csv("STK/Part_2/2_Inertial_HPOP_660.csv", nrows=NUMBER, usecols=range(1,7)) ).values
 # 赋值HPOP_1, HPOP_2
-HPOP_1, HPOP_2 = basic_i0A, basic_i28B
+HPOP_1, HPOP_2 = basic_i28A, basic_i28B
 
 
 import matplotlib as mpl
 mpl.rcParams['font.sans-serif'] = ['NSimSun', 'Times New Roman'] # 指定默认字体
 mpl.rcParams['font.family']='sans-serif'
 mpl.rcParams['axes.unicode_minus'] = False # 解决保存图像是负号'-'显示为方块的问题
-mpl.rcParams["figure.figsize"] = (3.05, 2.1); mpl.rcParams['lines.linewidth'] = 1
-mpl.rcParams['legend.fontsize'] = 6; mpl.rcParams['axes.labelsize'] = 8;
-mpl.rcParams['xtick.labelsize'] = 6; mpl.rcParams['ytick.labelsize'] = 6
-mpl.rcParams['savefig.dpi'] = 300
+mpl.rcParams["figure.figsize"] = (3.2, 2.2); mpl.rcParams['lines.linewidth'] = 1
+mpl.rcParams['legend.fontsize'] = 8; mpl.rcParams['axes.labelsize'] = 8;
+mpl.rcParams['xtick.labelsize'] = 8; mpl.rcParams['ytick.labelsize'] = 8
+mpl.rcParams['savefig.dpi'] = 400; mpl.rcParams['figure.dpi'] = 400
 
 class Navigation(Orbit):
 	
@@ -94,7 +89,7 @@ class Navigation(Orbit):
 	def extend_kf(self, number=240):
 		'''扩展卡尔曼滤波算法, 初步看滤波效果'''
 		global Time
-		P0 = np.diag([ 3e-1, 3e-1, 3e-1, 1e-6, 1e-6, 1e-6, 3e-1, 3e-1, 3e-1, 1e-6, 1e-6, 1e-6 ])
+		P0 = np.diag([ 3e-1, 3e-1, 3e-1, 3e-6, 3e-6, 3e-6, 3e-1, 3e-1, 3e-1, 3e-6, 3e-6, 3e-6 ])
 		error = np.random.multivariate_normal(mean=np.zeros(12), cov=P0)
 		X0 = np.hstack( (HPOP_1[0], HPOP_2[0]) ) + error
 		X, P, I = [X0], [P0], identity(12)
@@ -130,10 +125,9 @@ class Navigation(Orbit):
 		return np.array(Z)	# np.array, (4, )
 		
 	
-	def unscented_kf(self, number=number):
+	def unscented_kf(self, number=NUMBER):
 		global Time
 		P0 = np.diag([ 3e-2, 3e-2, 3e-2, 3e-6, 3e-6, 3e-6, 3e-2, 3e-2, 3e-2, 3e-6, 3e-6, 3e-6 ])
-		P1 = np.diag([ 3e-2, 3e-2, 3e-2, 3e-6, 3e-6, 3e-6, 3e-2, 3e-2, 3e-2, 3e-6, 3e-6, 3e-6 ]) / 1e-2
 		error = np.random.multivariate_normal(mean=np.zeros(12), cov=P0)
 		X0 = np.hstack( (HPOP_1[0], HPOP_2[0]) ) + error
 		points = MerweScaledSigmaPoints(n=12, alpha=0.001, beta=2.0, kappa=-9)
@@ -150,25 +144,25 @@ class Navigation(Orbit):
 		return XF
 		
 
-	def plot_filter(self, X, number):
+	def plot_filter_higher(self, X, number):
 		X1, X2 = X[:number, :6], X[:number, 6:]
 		delta_x1 = X1[:number] - HPOP_1[:number]
 		delta_x2 = X2[:number] - HPOP_2[:number]
 		delta_norm_r1 = np.array([ np.linalg.norm(X, 2) for X in delta_x1[:, 0:3] ])
 		delta_norm_r2 = np.array([ np.linalg.norm(X, 2) for X in delta_x2[:, 0:3] ])
 		time_range = np.arange(0, number*120/3600, 120/3600)
-		up_error = 50 + 1e3 * np.power(e, -time_range)
-		low_error = -50 - 1e3 * np.power(e, -time_range)
-		v_upError = 0.1 + np.power(e, -time_range)
-		v_lowError = -0.1 - np.power(e, -time_range)
+		up_error = 30 + 1e3 * np.power(e, -time_range)
+		low_error = -30 - 1e3 * np.power(e, -time_range)
+		v_upError = 0.02 + np.power(e, -time_range)
+		v_lowError = -0.02 - np.power(e, -time_range)
 		plt.figure(1)
 		plt.xlabel("时间 / $\mathrm{h}$"); plt.ylabel("位置误差 / ($\mathrm{m}$)")
 		plt.plot(time_range, delta_x1[:, 0] * 1000, "r-", label="x")
 		plt.plot(time_range, delta_x1[:, 1] * 1000, "b--", label="y")
 		plt.plot(time_range, delta_x1[:, 2] * 1000, "g-.", label="z")
 		plt.plot(time_range, up_error, "k:")
-		plt.plot(time_range, low_error, "k:", label=" $\mathrm{\pm 50 m}$")
-		plt.legend(); plt.tight_layout(); plt.savefig("Figure/FourChapter/A星位置收敛曲线.png", dpi=300, bbox_inches='tight')
+		plt.plot(time_range, low_error, "k:", label=" $\mathrm{\pm 30 m}$")
+		plt.legend(); plt.tight_layout(); plt.savefig("Figure/FourChapter/Rk_Divide100/A星位置收敛曲线.png", dpi=300, bbox_inches='tight')
 		
 		plt.figure(2)
 		plt.xlabel("时间 / $\mathrm{h}$"); plt.ylabel("速度误差 / ($\mathrm{m/s}$)")
@@ -176,8 +170,8 @@ class Navigation(Orbit):
 		plt.plot(time_range, delta_x1[:, 4] * 1000, "b--", label="y")
 		plt.plot(time_range, delta_x1[:, 5] * 1000, "g-.", label="z")
 		plt.plot(time_range, v_upError, "k:")
-		plt.plot(time_range, v_lowError, "k:", label=" $\mathrm{\pm 0.1 m/s}$")
-		plt.legend(); plt.tight_layout(); plt.savefig("Figure/FourChapter/A星速度收敛曲线.png", dpi=300, bbox_inches='tight')
+		plt.plot(time_range, v_lowError, "k:", label=" $\mathrm{\pm 0.02 m/s}$")
+		plt.legend(); plt.tight_layout(); plt.savefig("Figure/FourChapter/Rk_Divide100/A星速度收敛曲线.png", dpi=300, bbox_inches='tight')
 
 		plt.figure(3)
 		plt.xlabel("时间 / $\mathrm{h}$"); plt.ylabel("位置误差 / ($\mathrm{m}$)")
@@ -185,8 +179,8 @@ class Navigation(Orbit):
 		plt.plot(time_range, delta_x2[:, 1] * 1000, "b--", label="y")
 		plt.plot(time_range, delta_x2[:, 2] * 1000, "g-.", label="z")
 		plt.plot(time_range, up_error, "k:")
-		plt.plot(time_range, low_error, "k:", label=" $\mathrm{\pm 50 m}$")
-		plt.legend(); plt.tight_layout(); plt.savefig("Figure/FourChapter/B星位置收敛曲线.png", dpi=300, bbox_inches='tight')
+		plt.plot(time_range, low_error, "k:", label=" $\mathrm{\pm 30 m}$")
+		plt.legend(); plt.tight_layout(); plt.savefig("Figure/FourChapter/Rk_Divide100/B星位置收敛曲线.png", dpi=300, bbox_inches='tight')
 		
 		plt.figure(4)
 		plt.xlabel("时间 / $\mathrm{h}$"); plt.ylabel("速度误差 / ($\mathrm{m/s}$)")
@@ -194,21 +188,21 @@ class Navigation(Orbit):
 		plt.plot(time_range, delta_x2[:, 4] * 1000, "b--", label="y")
 		plt.plot(time_range, delta_x2[:, 5] * 1000, "g-.", label="z")
 		plt.plot(time_range, v_upError, "k:")
-		plt.plot(time_range, v_lowError, "k:", label=" $\mathrm{\pm 0.1 m/s}$")
-		plt.legend(); plt.tight_layout(); plt.savefig("Figure/FourChapter/B星速度收敛曲线.png", dpi=300, bbox_inches='tight')
+		plt.plot(time_range, v_lowError, "k:", label=" $\mathrm{\pm 0.02 m/s}$")
+		plt.legend(); plt.tight_layout(); plt.savefig("Figure/FourChapter/Rk_Divide100/B星速度收敛曲线.png", dpi=300, bbox_inches='tight')
 		
-		abs_error = 100 + 1e3 * np.power(e, -time_range)
+		abs_error = 50 + 1e3 * np.power(e, -time_range)
 		plt.figure(5)
 		plt.xlabel("时间 / $\mathrm{h}$"); plt.ylabel("位置误差 / ($\mathrm{m}$)")
 		plt.plot(time_range, delta_norm_r1 * 1000, "r-", label="A星位置误差")
-		plt.plot(time_range, abs_error, "k:", label="+100 m")
-		plt.legend(); plt.tight_layout(); plt.savefig("Figure/FourChapter/A星绝对误差曲线.png", dpi=300, bbox_inches='tight')
+		plt.plot(time_range, abs_error, "k:", label="+50 m")
+		plt.legend(); plt.tight_layout(); plt.savefig("Figure/FourChapter/Rk_Divide100/A星绝对误差曲线.png", dpi=300, bbox_inches='tight')
 		
 		plt.figure(6)
 		plt.xlabel("时间 / $\mathrm{h}$"); plt.ylabel("位置误差 / ($\mathrm{m}$)")
 		plt.plot(time_range, delta_norm_r2 * 1000, "b--", label="B星位置误差")
-		plt.plot(time_range, abs_error, "k:", label="+100 m")
-		plt.legend(); plt.tight_layout(); plt.savefig("Figure/FourChapter/B星绝对误差曲线.png", dpi=300, bbox_inches='tight')
+		plt.plot(time_range, abs_error, "k:", label="+50 m")
+		plt.legend(); plt.tight_layout(); plt.savefig("Figure/FourChapter/Rk_Divide100/B星绝对误差曲线.png", dpi=300, bbox_inches='tight')
 
 		plt.show()
 		
@@ -220,8 +214,8 @@ if __name__ == "__main__":
 	number = 720
 	
 	# # X = nav.extend_kf(number)
-	X = nav.unscented_kf(number)
-	np.save("npy/ia=0, ib=28, P0=3e-2.npy", X)
-	# X = np.load("npy/basic_x_.npy")
-	nav.plot_filter(X, number)
+	# X = nav.unscented_kf(number)
+	# np.save("npy/i=28, P0=3e-2, RkDivide100.npy", X)
+	X = np.load("npy/i=28, P0=3e-2, RkDivide100.npy")
+	nav.plot_filter_higher(X, number)
 	

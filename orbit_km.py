@@ -1,42 +1,37 @@
 # -*- coding: utf-8 -*-
 
+
+from math import *
 import numpy as np
 import pandas as pd
-from matplotlib import pyplot as plt
-from math import *
-from datetime import datetime, timedelta
 import de421
 from jplephem import Ephemeris
 from jplephem.spk import SPK
-from scipy.integrate import solve_ivp
+from matplotlib import pyplot as plt
+from datetime import datetime, timedelta
+from scipy.integrate import ode, solve_ivp, RK45, LSODA
+from functools import partial
+from global_list import *
 
 
-
-# 恒定常值变量区
-MIU_E, MIU_M, MIU_S = 398600.4415, 4902.80030555540, 132712422595.6590		# 引力系数，单位 km^3 / s^2
-RE, RM, RS = 6378.1363, 1738.000, 69550.0		#天体半径，单位 km
-number, CSD_LM, STEP = 495, 80, 120	#全局积分步长
-Beta = 0
+# 球谐系数、星历与时间戳处理
 C, S = np.load("STK/Clm.npy"), np.load("STK/Slm.npy")	# 序列化后代码速度提高4倍
-
-
-# 计算常值变量与函数区, 加速运算过程
 kernel = SPK.open(r"..\de421\de421.bsp")
 eph = Ephemeris(de421)
 time_utc = pd.Timestamp("2018-1-1 00:00:00", freq="1S")
-B = []
+
+# 计算常值变量与函数区, 加速运算过程
+Brandon = []
 for i in range(CSD_LM+1):
 	A = [ sqrt( (2*i+1)*(2*i-1) / ((i+j)*(i-j)) ) for j in range(i) ]
-	A.append(1); B.append(np.array(A))
-B = np.array(B)		# B用于完全规格化勒让德函数计算
-pi_dot = np.array([ np.array( [sqrt((i+1)*i/2)] + [ sqrt( (i+j+1)*(i-j) ) for j in range(1, i+1)] ) for i in range(CSD_LM+1) ])
+	A.append(1); Brandon.append(np.array(A))
+Brandon = np.array(Brandon)		# Brandon用于完全规格化勒让德函数计算
+Pi_dot = np.array([ np.array( [sqrt((i+1)*i/2)] + [ sqrt( (i+j+1)*(i-j) ) for j in range(1, i+1)] ) for i in range(CSD_LM+1) ])
 M_Array = np.array([ j for j in range(0, CSD_LM+1) ])
 Rx_bas = lambda x: np.array([[1, 0, 0], [0, cos(x), sin(x)], [0, -sin(x), cos(x)]])
 Ry_bas = lambda y: np.array([[cos(y), 0, -sin(y)], [0, 1, 0], [sin(y),0, cos(x)]])
 Rz_bas = lambda z: np.array([[cos(z), sin(z), 0], [-sin(z), cos(z), 0], [0, 0, 1]])
 LCS2I = np.dot( Rx_bas(radians(24.358897)), Rz_bas(radians(-3.14227)) )		# 月心天球 -> 月心惯性系
-
-
 
 import timeit
 from functools import wraps
@@ -54,15 +49,17 @@ def fn_timer(function):
 
 class Orbit:
 	
-	def __init__(self):
-		self.rv = np.zeros(6)
-		self.time = 0
+	def __init__(self, step=STEP, order=CSD_LM, degree=CSD_LM):
+		'''初始化积分步长, 引力场阶次'''
+		self.step = STEP
+		self.order = order
+		self.degree = degree
 			
 	def __del__(self):
 		return	
 		
 	def readCoffients(self, number=3321, n=80):
-		'''获取中心天体球谐引力系数，默认前30阶，包括0阶项, np.array'''
+		'''获取中心天体球谐引力系数，默认前80阶，包括0阶项, np.array'''
 		df = pd.read_csv("STK/GL0660B.grv", sep="\s+", header=None, nrows=number)
 		f = df[:number]
 		f.columns = ["l", "m", "Clm", "Slm"]
@@ -107,16 +104,27 @@ class Orbit:
 		phi, theta, psi = eph.position("librations", tdb_jd)	# 物理天平动的三个欧拉角, np.array([0])
 		CS2F = np.dot( np.dot(Rz_bas(psi), Rx_bas(theta)), Rz_bas(phi) )	# 月心天球 -> 月固系
 		return np.dot(CS2F, LCS2I.T)	# 月惯系 -> 月固系, F = CS2F * I2CS * I
+		
+	
+	def inertial2RTN(self, rv):
+		'''月惯系到星固系(RTN)的方向余弦矩阵, 李博 - 基于星间定向观测的导航星座'''
+		r, v = rv[:3], rv[3:6]
+		R1 = r / np.linalg.norm(r, 2)
+		r_cross_v = np.cross(r, v)
+		R3 = r_cross_v / np.linalg.norm(r_cross_v, 2)
+		R2 = np.cross(R3, R1)
+		inertial2RTN = np.array([ R1, R2, R3])
+		return inertial2RTN
 	
 
 	def legendre_spher_alfs(self, phi, lm=CSD_LM):
 		'''计算完全规格化缔合勒让德函数，球坐标形式，Brandon A. Jones - Efficient Models for the Evaluation and Estimation(eqs. 2.8)
 		输入：地心纬度, rad;		阶次lm
-		输出：可用于向量直接计算的勒让德函数，包含P_00项	np.array, B提前计算并存储以加快运算速度'''
+		输出：可用于向量直接计算的勒让德函数，包含P_00项	np.array, Brandon提前计算并存储以加快运算速度'''
 		sin_phi, cos_phi = sin(phi), cos(phi)	# 提前计算提升效率
 		P = [ np.array([1, 0]), np.array([ sqrt(3)*sin_phi, sqrt(3)*cos_phi, 0 ]) ]
 		for i in range(2, lm+1):
-			P_ij = [ B[i][j] * sin_phi * P[i-1][j] - B[i][j]/B[i-1][j] * P[i-2][j] for j in range(i) ]
+			P_ij = [ Brandon[i][j] * sin_phi * P[i-1][j] - Brandon[i][j]/Brandon[i-1][j] * P[i-2][j] for j in range(i) ]
 			P_ii = sqrt((2*i+1)/(2*i)) * cos_phi * P[i-1][i-1]
 			P_ij.extend([P_ii, 0]); P.append(np.array(P_ij))
 		return np.array(P)
@@ -126,7 +134,7 @@ class Orbit:
 		'''计算完全规格化缔合勒让德函数的一阶导数，球坐标形式，Brandon A. Jones(eqs. 2.14)
 		输入：地心纬度, rad;	完全规格化勒让德函数P;		阶次lm'''
 		tan_phi = tan(phi)
-		dP = np.array([ P[i][1:] * pi_dot[i] - M_Array[:i+1]*tan_phi * P[i][:-1] for i in range(0, lm+1) ])
+		dP = np.array([ P[i][1:] * Pi_dot[i] - M_Array[:i+1]*tan_phi * P[i][:-1] for i in range(0, lm+1) ])
 		return dP
 		
 		
@@ -140,7 +148,7 @@ class Orbit:
 		
 		
 	def nonspher_J2(self, r_sat, miu=MIU_M, Re=RM):
-		'''计算J2项的摄动引力加速度'''
+		'''计算J2项的摄动引力加速度, 输出ndarray, m/s^2'''
 		J2 = C[2][0]; x, y, z = r_sat
 		r_norm = np.linalg.norm(r_sat, 2)
 		pow_r2, pow_r3 = pow(r_norm, 2), pow(r_norm, 3)
@@ -164,7 +172,7 @@ class Orbit:
 		sin_m = np.array([ sin(j*lamda) for j in range(0, lm+1) ])
 		P = self.legendre_spher_alfs(phi, lm)	# 勒让德函数
 		dU_dr = -miu/pow_r2 * sum([ pow(rRatio, i)*(i+1) * np.dot(P[i][:-1], C[i]*cos_m[:i+1] + S[i]*sin_m[:i+1]) for i in range(2, lm+1) ]) 
-		dU_dphi = miu/r_norm * sum([ pow(rRatio, i) * np.dot(P[i][1:] * pi_dot[i] -  tan_phi*M_Array[:i+1] * P[i][:-1], \
+		dU_dphi = miu/r_norm * sum([ pow(rRatio, i) * np.dot(P[i][1:] * Pi_dot[i] -  tan_phi*M_Array[:i+1] * P[i][:-1], \
 							C[i]*cos_m[:i+1] + S[i]*sin_m[:i+1]) for i in range(2, lm+1) ])
 		dU_dlamda = miu/r_norm * sum([ pow(rRatio, i) * np.dot(M_Array[:i+1]*P[i][:-1], S[i]*cos_m[:i+1] - C[i]*sin_m[:i+1]) for i in range(2, lm+1) ])
 		dR_dr = r_fixed / r_norm	# 球坐标对直角坐标的偏导数, Keric Hill(eq. 8.10), Brandon Jones(eq. 2.13)
@@ -250,6 +258,7 @@ class Orbit:
 		F1 = self.nonspher_moon(R, tdb_jd, miu, Re) 
 		F2 = self.thirdEarth(R, tdb_jd)
 		F3 = self.thirdSun(R, tdb_jd)
+		# F = F0 + F1		# km/s^2
 		F = F0 + F1 + F2 + F3		# km/s^2
 		V.extend(F)
 		return np.array(V)		# km/s, km/s^2	
@@ -302,7 +311,7 @@ class Orbit:
 		dlamda_dr = 1/pow(xy_norm, 2) * np.array([ [-y, x, 0] ])	# (1*3)
 		# U对r(vector) 的一阶偏导数, 均为 const
 		dU_dR = -miu/pow_r2 * ( sum([ pow(rRatio, i)*(i+1) * np.dot(P[i][:-1], C[i]*cos_m[:i+1] + S[i]*sin_m[:i+1]) for i in lm_range ]) )
-		dU_dphi = miu/r_norm * sum([ pow(rRatio, i) * np.dot(P[i][1:] * pi_dot[i] -  tan_phi*M_Array[:i+1] * P[i][:-1], \
+		dU_dphi = miu/r_norm * sum([ pow(rRatio, i) * np.dot(P[i][1:] * Pi_dot[i] -  tan_phi*M_Array[:i+1] * P[i][:-1], \
 							C[i]*cos_m[:i+1] + S[i]*sin_m[:i+1]) for i in lm_range ])
 		dU_dlamda = miu/r_norm * sum( [ pow(rRatio, i) * np.dot(M_Array[:i+1]*P[i][:-1], S[i]*cos_m[:i+1] - C[i]*sin_m[:i+1]) for i in lm_range ] )
 		# U对R(scalar), phi, lamda 的二阶偏导数计算, Hill与王庆宾一致, 均为 const
@@ -360,6 +369,37 @@ class Orbit:
 		up, low = np.hstack((O, I)), np.hstack((da_dr, da_dv))
 		M_st = np.vstack((up, low))		# 6*6
 		return M_st		# dP = M_st * P
+		
+		
+	def coefMatrix_state(self, t, Phi, r_sat):
+		'''计算双星系统在t时刻的状态转移矩阵微分方程的右函数 np.array([ [A1, O], [O, A2] ]) * Phi
+		输入：时刻 t,  s; 		状态转移矩阵(待求),  36*1; 	卫星位置矢量,  km; 		平均计算时间0.012s'''
+		Phi = Phi.reshape((6, 6), order="F")	# 6*6
+		tdb_jd = (time_utc+int(t)).to_julian_date() + 69.184/86400
+		Ft = self.coefMatrix_single(r_sat, tdb_jd)	 # 6*6
+		Phi_36 = np.dot(Ft, Phi).reshape(36, order="F")
+		return Phi_36 	# 36*1, ndarray
+		
+	@fn_timer	
+	def jacobian_single(self, t, r_sat):
+		'''计算单颗卫星 t时刻至t+STEP时刻 的状态转移矩阵(Jacobian矩阵), 使用RK45完成数值积分, 6*6'''
+		Phi_0 = (np.identity(6)).reshape(36, order="F")		# 36*1, ndarray, 按列展开
+		solution = solve_ivp( partial(self.coefMatrix_state, r_sat=r_sat), (t, t+STEP), Phi_0, method="RK45", \
+					rtol=1e-9, atol=1e-9, t_eval=[t+STEP] )
+		PHI = (solution.y).reshape(6, 6, order="F")
+		return PHI	# 6*6, ndarray
+		
+		
+	def jacobian_state(self, t, r_sat):
+		'''计算离散化的状态转移矩阵, 
+		参考文献: 2015, Autonomous Navigation of Mars Probes,  Pengbin Ma
+				  2017, Observability-based Mars Autonomous Navigation,  Yangwei Ou
+				  2010, Double line-of-sight measuring relative navigation, Tong Chen'''
+		tdb_jd = (time_utc+int(t)).to_julian_date() + 69.184/86400
+		F_xk = self.coefMatrix_single(r_sat, tdb_jd)
+		PHI = np.identity(6) + F_xk*STEP + 0.5 * np.power(F_xk, 2) * pow(STEP, 2)
+		return 	PHI
+
 
 		
 		
@@ -368,20 +408,18 @@ if __name__ == "__main__":
 	
 	ob = Orbit()
 	# ob.readCoffients()
-	number = 10
-	data = pd.read_csv("STK/Part_2/1_Inertial_HPOP_660.csv", nrows=number, usecols=range(1, 7))	# 取前number个点进行试算
-	RV_array = data.values
-	r_array = RV_array[:, :3]
+	number = 4
+	data = pd.read_csv("STK/Part_2/1_Inertial_HPOP_660.csv", nrows=number, usecols=range(1, 7)).values	# 取前number个点进行试算
+	r_array = data[:, :3]
 	t_list = range(0, number*STEP, STEP)
 	utc_array = (ob.generate_time(start_t="20180101", end_t="20180131"))[:number]
 	utcJD_list = [ time_utc.to_julian_date() for time_utc in utc_array ]
 	tdbJD_list = [ time_utc.to_julian_date() + 69.184/86400 for time_utc in utc_array ]
-	r_sat, RV, time_utc = r_array[0], RV_array[0], utc_array[0]
+	r_sat, RV, time_utc = r_array[0], data[0], utc_array[0]
 	utc_jd, tdb_jd = time_utc.to_julian_date(), time_utc.to_julian_date() + 69.184/86400
-	X0 = np.array([ 1.84032000e+03,  0.00000000e+00,  0.00000000e+00, -0.00000000e+00, 1.57132000e+00,  8.53157000e-01])
-	# print(ob.coefMatrix_single(r_sat, tdb_jd))
-	
-	centre_1 = np.array([ ob.partial_third(r_sat, tdb_jd) for r_sat, tdb_jd in zip(r_array[:10], tdbJD_list[:10]) ])
-	centre_2 = np.array([ ob.partial_third_1(r_sat, tdb_jd) for r_sat, tdb_jd in zip(r_array[:10], tdbJD_list[:10]) ])
-	centre_3 = np.array([ ob.partial_third_2(r_sat, tdb_jd) for r_sat, tdb_jd in zip(r_array[:10], tdbJD_list[:10]) ])
+	# sat_a = ob.integrate_orbit(RV, 720)
+	# np.save("npy/660_satA.npy", sat_a)	
+	sat_a = (np.load("npy/660_satA.npy")).T
+	Sat_A = [ sat_a[0] ]
+
 	
